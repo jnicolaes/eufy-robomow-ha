@@ -1,20 +1,27 @@
 """Eufy cloud settings client.
 
 Authenticates via Eufy/Tuya mobile API (same flow as eufy-clean-local-key-grabber)
-and reads/writes DP155, a base64-encoded protobuf blob that stores the four
+and reads/writes DP155, a base64-encoded protobuf blob that stores the five
 cloud-managed settings for the E15:
 
     field 1  (message) : const sub-msg {field1: 40}   ← sub-message, NOT bare varint
     field 2  (message) : travel speed  — empty = slow, {1:1} = normal, {1:2} = fast
     field 3  (message) : edge distance — {1: mm}  (signed; negative = beyond wire)
-    field 4  (message) : preserved (constant, unknown purpose)
+    field 4  (message) : pad direction — {f2:{f1: angle}, f3: fixed, f5: fixed}
+                         angle in degrees (1 unit = 1°); 0 = west (9 o'clock);
+                         90 = north (12 o'clock); 180 = east (3 o'clock), etc.
     field 5  (message) : path distance — {1: mm}
     field 6  (message) : blade speed   — empty = slow, {1:1} = normal, {1:2} = fast
-    field 7  (varint)  : mirrors edge_mm (same value as field 3's inner varint)
+    field 7  (varint)  : mirrors path_mm (same value as field 5's inner varint)
+
+NOTE: DP154 was previously assumed to hold pad direction but testing showed it does
+NOT change when the app's direction dial is moved.  DP155 field 4 is the correct
+location.  DP154's purpose is currently unknown.
 
 All API calls are synchronous; callers must run them in an executor thread
 (hass.async_add_executor_job) to avoid blocking the event loop.
 """
+
 from __future__ import annotations
 
 import base64
@@ -35,18 +42,18 @@ _LOGGER = logging.getLogger(__name__)
 
 # ── App credentials (extracted from Eufy Home Android app) ────────────────────
 
-_EUFY_BASE_URL      = "https://home-api.eufylife.com/v1/"
-_EUFY_CLIENT_ID     = "eufyhome-app"
+_EUFY_BASE_URL = "https://home-api.eufylife.com/v1/"
+_EUFY_CLIENT_ID = "eufyhome-app"
 _EUFY_CLIENT_SECRET = "GQCpr9dSp3uQpsOMgJ4xQ"
-_EUFY_PLATFORM      = "sdk_gphone64_arm64"
-_EUFY_LANGUAGE      = "en"
-_EUFY_TIMEZONE      = "Europe/London"
+_EUFY_PLATFORM = "sdk_gphone64_arm64"
+_EUFY_LANGUAGE = "en"
+_EUFY_TIMEZONE = "Europe/London"
 
-_TUYA_CLIENT_ID   = "yx5v9uc3ef9wg3v9atje"
+_TUYA_CLIENT_ID = "yx5v9uc3ef9wg3v9atje"
 _TUYA_INITIAL_URL = "https://a1.tuyaeu.com"
-_TUYA_APP_SECRET  = "s8x78u7xwymasd9kqa7a73pjhxqsedaj"
-_TUYA_BMP_SECRET  = "cepev5pfnhua4dkqkdpmnrdxx378mpjr"
-_TUYA_HMAC_KEY    = f"A_{_TUYA_BMP_SECRET}_{_TUYA_APP_SECRET}".encode("utf-8")
+_TUYA_APP_SECRET = "s8x78u7xwymasd9kqa7a73pjhxqsedaj"
+_TUYA_BMP_SECRET = "cepev5pfnhua4dkqkdpmnrdxx378mpjr"
+_TUYA_HMAC_KEY = f"A_{_TUYA_BMP_SECRET}_{_TUYA_APP_SECRET}".encode("utf-8")
 
 # AES-128-CBC key+IV for deriving the Tuya login password from the UID
 _TUYA_PASSWORD_KEY = bytes(
@@ -58,30 +65,46 @@ _TUYA_PASSWORD_IV = bytes(
 
 # Query parameters included in the HMAC signature
 _SIGNATURE_PARAMS = {
-    "a", "v", "lat", "lon", "lang", "deviceId", "appVersion", "ttid",
-    "isH5", "h5Token", "os", "clientId", "postData", "time", "requestId",
-    "et", "n4h5", "sid", "sp",
+    "a",
+    "v",
+    "lat",
+    "lon",
+    "lang",
+    "deviceId",
+    "appVersion",
+    "ttid",
+    "isH5",
+    "h5Token",
+    "os",
+    "clientId",
+    "postData",
+    "time",
+    "requestId",
+    "et",
+    "n4h5",
+    "sid",
+    "sp",
 }
 
 _DEFAULT_TUYA_PARAMS: dict[str, str] = {
     "appVersion": "2.4.0",
-    "deviceId":   "",
-    "platform":   _EUFY_PLATFORM,
-    "clientId":   _TUYA_CLIENT_ID,
-    "lang":       _EUFY_LANGUAGE,
-    "osSystem":   "12",
-    "os":         "Android",
+    "deviceId": "",
+    "platform": _EUFY_PLATFORM,
+    "clientId": _TUYA_CLIENT_ID,
+    "lang": _EUFY_LANGUAGE,
+    "osSystem": "12",
+    "os": "Android",
     "timeZoneId": _EUFY_TIMEZONE,
-    "ttid":       "android",
-    "et":         "0.0.1",
+    "ttid": "android",
+    "et": "0.0.1",
     "sdkVersion": "3.0.8cAnker",
 }
 
 # ── Speed option values ────────────────────────────────────────────────────────
 
-SPEED_SLOW   = "slow"
+SPEED_SLOW = "slow"
 SPEED_NORMAL = "normal"
-SPEED_FAST   = "fast"
+SPEED_FAST = "fast"
 SPEED_OPTIONS = [SPEED_SLOW, SPEED_NORMAL, SPEED_FAST]
 
 _SPEED_TO_INT: dict[str, int] = {SPEED_SLOW: 0, SPEED_NORMAL: 1, SPEED_FAST: 2}
@@ -89,21 +112,23 @@ _INT_TO_SPEED: dict[int, str] = {0: SPEED_SLOW, 1: SPEED_NORMAL, 2: SPEED_FAST}
 
 # ── DP155 preserved constants ──────────────────────────────────────────────────
 
-_FIELD1_CONST = 40   # field 1: inner value of sub-message {field1: 40} (constant)
+_FIELD1_CONST = 40  # field 1: inner value of sub-message {field1: 40} (constant)
 
-# Field 7 is NOT a constant: live device data shows it always equals edge_mm
-# (same value as field 3's inner varint).  We previously misidentified it as
-# "const 80" because the device was at its 8 cm (80 mm) default during tests.
-# We now set field 7 = edge_mm to match what the Eufy app writes.
+# Field 7 mirrors path_mm (NOT edge_mm as previously assumed).
+# Confirmed by live data: field7=90 when path_mm=90, edge_mm=70.
 
-# Content bytes of field 4 sub-message (confirmed constant across all setting changes).
-# When re-encoding, this is placed verbatim as the body of field 4.
-_FIELD4_CONTENT = bytes.fromhex("1202085a1a040a025a5a285a")
+# Field 4 contains pad direction in sub-field 2 ({f1: angle_degrees}).
+# Sub-fields 3 and 5 within field 4 are device-fixed constants; we preserve
+# them verbatim.  Observed bytes (little-endian protobuf):
+#   f3 = 1a 04 0a 02 5a 5a   (field3, len=4, inner=[f1, len=2, 0x5a, 0x5a])
+#   f5 = 28 5a               (field5, varint=90)
+_FIELD4_SUFFIX = bytes.fromhex("1a040a025a5a285a")  # f3 + f5 (fixed)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Minimal protobuf encoder / decoder  (no external dependency)
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def _varint_encode(value: int) -> bytes:
     """Encode an integer as a protobuf varint.
@@ -114,7 +139,7 @@ def _varint_encode(value: int) -> bytes:
     replace with: value = (value << 1) ^ (value >> 31) before encoding.
     """
     if value < 0:
-        value = value & 0xFFFFFFFFFFFFFFFF   # two's complement → 64-bit unsigned
+        value = value & 0xFFFFFFFFFFFFFFFF  # two's complement → 64-bit unsigned
     out: list[int] = []
     while True:
         bits = value & 0x7F
@@ -144,10 +169,10 @@ def _varint_decode(data: bytes, pos: int) -> tuple[int, int]:
 def _encode_field(field_num: int, wire_type: int, value: bytes | int) -> bytes:
     """Encode a single protobuf field (wire types 0=varint, 2=length-delimited)."""
     tag = _varint_encode((field_num << 3) | wire_type)
-    if wire_type == 0:          # varint
+    if wire_type == 0:  # varint
         assert isinstance(value, int)
         return tag + _varint_encode(value)
-    if wire_type == 2:          # length-delimited
+    if wire_type == 2:  # length-delimited
         assert isinstance(value, (bytes, bytearray))
         return tag + _varint_encode(len(value)) + value
     raise ValueError(f"Unsupported wire type {wire_type}")
@@ -157,8 +182,19 @@ def _encode_speed_submsg(speed: str) -> bytes:
     """Encode a speed value as the body of a speed sub-message."""
     int_val = _SPEED_TO_INT.get(speed, 0)
     if int_val == 0:
-        return b""                          # slow → empty sub-message
-    return _encode_field(1, 0, int_val)     # {field 1: 1 or 2}
+        return b""  # slow → empty sub-message
+    return _encode_field(1, 0, int_val)  # {field 1: 1 or 2}
+
+
+def _encode_field4(pad_direction: int) -> bytes:
+    """Encode DP155 field 4 body with the given pad direction angle.
+
+    Structure: {f2: {f1: angle}, f3: fixed, f5: fixed}
+    The f3 and f5 sub-fields are device constants preserved verbatim.
+    """
+    f2_inner = _encode_field(1, 0, pad_direction)   # {f1: angle}
+    f2 = _encode_field(2, 2, f2_inner)              # field 2 = {f1: angle}
+    return f2 + _FIELD4_SUFFIX
 
 
 def _encode_dp155(
@@ -166,16 +202,21 @@ def _encode_dp155(
     path_mm: int,
     travel_speed: str,
     blade_speed: str,
+    pad_direction: int = 90,
 ) -> str:
-    """Encode the four cloud settings into a DP155 base64 blob."""
+    """Encode the five cloud settings into a DP155 base64 blob."""
     payload = (
-        _encode_field(1, 2, _encode_field(1, 0, _FIELD1_CONST))             # field 1: sub-msg {f1:40}
-        + _encode_field(2, 2, _encode_speed_submsg(travel_speed))           # field 2: travel speed
-        + _encode_field(3, 2, _encode_field(1, 0, edge_mm))                 # field 3: edge dist (mm)
-        + _encode_field(4, 2, _FIELD4_CONTENT)                              # field 4: preserved
-        + _encode_field(5, 2, _encode_field(1, 0, path_mm))                 # field 5: path dist (mm)
-        + _encode_field(6, 2, _encode_speed_submsg(blade_speed))            # field 6: blade speed
-        + _encode_field(7, 0, edge_mm)                                       # field 7: mirrors edge_mm
+        _encode_field(
+            1, 2, _encode_field(1, 0, _FIELD1_CONST)
+        )  # field 1: sub-msg {f1:40}
+        + _encode_field(
+            2, 2, _encode_speed_submsg(travel_speed)
+        )  # field 2: travel speed
+        + _encode_field(3, 2, _encode_field(1, 0, edge_mm))  # field 3: edge dist (mm)
+        + _encode_field(4, 2, _encode_field4(pad_direction))  # field 4: pad direction
+        + _encode_field(5, 2, _encode_field(1, 0, path_mm))  # field 5: path dist (mm)
+        + _encode_field(6, 2, _encode_speed_submsg(blade_speed))  # field 6: blade speed
+        + _encode_field(7, 0, path_mm)  # field 7: mirrors path_mm
     )
     return base64.b64encode(payload).decode("ascii")
 
@@ -191,12 +232,12 @@ def _decode_dp155(blob: str) -> dict[str, Any]:
         field_num = tag_val >> 3
         wire_type = tag_val & 0x07
 
-        if wire_type == 0:          # varint — field 7 (= edge_mm); field 1 is now wire-2
+        if wire_type == 0:  # varint — field 7 (= path_mm mirror); ignored on decode
             _val, pos = _varint_decode(data, pos)
 
-        elif wire_type == 2:        # length-delimited
+        elif wire_type == 2:  # length-delimited
             length, pos = _varint_decode(data, pos)
-            inner = data[pos: pos + length]
+            inner = data[pos : pos + length]
             pos += length
 
             if field_num in (2, 6):
@@ -221,47 +262,84 @@ def _decode_dp155(blob: str) -> dict[str, Any]:
                         mm_val, _ = _varint_decode(inner, sub_pos)
                 # Convert uint64 varint back to signed int32 (two's complement)
                 if mm_val >= (1 << 63):
-                    mm_val -= (1 << 64)
+                    mm_val -= 1 << 64
                 if field_num == 3:
                     settings["edge_mm"] = mm_val
                 else:
                     settings["path_mm"] = mm_val
-            # field 4 is silently skipped (preserved at encode time via _FIELD4_CONTENT)
+
+            elif field_num == 4:
+                # Pad direction sub-message: {f2: {f1: angle_degrees}, f3: fixed, f5: fixed}
+                pad_val = 0
+                f4_pos = 0
+                while f4_pos < len(inner):
+                    f4_tag, f4_pos = _varint_decode(inner, f4_pos)
+                    f4_fn = f4_tag >> 3
+                    f4_wt = f4_tag & 0x07
+                    if f4_wt == 0:
+                        _, f4_pos = _varint_decode(inner, f4_pos)  # skip f5
+                    elif f4_wt == 2:
+                        f4_ln, f4_pos = _varint_decode(inner, f4_pos)
+                        f4_inner = inner[f4_pos : f4_pos + f4_ln]
+                        f4_pos += f4_ln
+                        if f4_fn == 2 and f4_inner:
+                            # f4.f2 contains {f1: angle}
+                            sub_tag, sub_pos = _varint_decode(f4_inner, 0)
+                            if (sub_tag >> 3) == 1 and (sub_tag & 7) == 0:
+                                pad_val, _ = _varint_decode(f4_inner, sub_pos)
+                    else:
+                        break
+                settings["pad_direction"] = pad_val
+                _LOGGER.debug("DP155 field4 pad_direction decoded: %d", pad_val)
 
         else:
-            _LOGGER.warning("DP155 unexpected wire type %d at field %d", wire_type, field_num)
+            _LOGGER.warning(
+                "DP155 unexpected wire type %d at field %d", wire_type, field_num
+            )
             break
 
     return settings
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DP154 — pad direction (mowing path angle)
+# DP154 — purpose unknown (NOT pad direction)
 # ══════════════════════════════════════════════════════════════════════════════
-
-# Observed encoding on the live E15:
-#   direction 0  →  b'\x00'      (base64: "AA==")  — device-native quirk
-#   direction 1  →  b'\x18\x01'  (base64: "GAE=")  — protobuf field 3 = 1
-#   direction 2  →  b'\x18\x02'  (predicted)        — protobuf field 3 = 2
-#   direction 3  →  b'\x18\x03'  (predicted)        — protobuf field 3 = 3
 #
-# Writing back: use b'\x00' for direction 0, protobuf field 3 = N for N > 0,
-# matching the encoding the device itself produces.
+# Live testing showed DP154 does NOT change when the app's pad direction dial
+# is moved.  The pad direction is stored in DP155 field 4 (see above).
+# DP154 is kept here for future investigation; the functions below are no
+# longer called by the integration.
+#
+# Observed values:  0 → b'\x00' ("AA==");  1 → b'\x18\x01' ("GAE=")
 
 
 def _encode_dp154(direction: int) -> str:
-    """Encode a pad direction integer (0–3) as a DP154 base64 blob."""
+    """Encode a pad direction integer (0–359°) as a DP154 base64 blob.
+
+    Device-native format:
+        degrees 0 → b'\x00'  (single null byte, device quirk)
+        degrees N → 0x18 + varint(N)  (field 3, wire type 0)
+    """
     if direction == 0:
-        payload = b"\x00"                           # device-native encoding for 0
+        return "AA=="
+
+    # Manual encoding to match device format: field 3, wire type 0 (varint)
+    # tag = ((field_num << 3) | wire_type) = (3 << 3) | 0 = 0x18 = 24
+    tag = 0x18
+    if direction < 128:
+        value_byte = bytes([direction])
     else:
-        payload = _encode_field(3, 0, direction)    # protobuf: field 3 = direction
+        value_byte = _varint_encode(direction)
+    payload = bytes([tag]) + value_byte
+
     return base64.b64encode(payload).decode("ascii")
 
 
 def _decode_dp154(blob: str) -> int:
-    """Decode a DP154 base64 blob → pad direction integer (0–3)."""
+    """Decode a DP154 base64 blob → pad direction integer."""
     data = base64.b64decode(blob)
     if not data or data == b"\x00":
+        _LOGGER.debug("DP154 decode: null → 0")
         return 0
     try:
         pos = 0
@@ -270,9 +348,11 @@ def _decode_dp154(blob: str) -> int:
         wire_type = tag_val & 0x07
         if field_num == 3 and wire_type == 0:
             val, _ = _varint_decode(data, pos)
+            _LOGGER.debug("DP154 decode: field3=%d", val)
             return val
-    except Exception:   # noqa: BLE001
-        _LOGGER.warning("DP154 decode failed for blob %r", blob)
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.warning("DP154 decode failed for blob %r: %s", blob, e)
+    _LOGGER.debug("DP154 decode: fallback → 0 for blob %r (raw: %s)", blob, data.hex())
     return 0
 
 
@@ -280,9 +360,10 @@ def _decode_dp154(blob: str) -> int:
 # Eufy / Tuya mobile API helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _generate_device_id() -> str:
     """Generate a pseudo-random 44-char Tuya device ID (mimics Android SDK)."""
-    prefix = "8534c8ec0ed0"   # MD5-based prefix from a Google Pixel AVD
+    prefix = "8534c8ec0ed0"  # MD5-based prefix from a Google Pixel AVD
     chars = string.ascii_letters + string.digits
     return prefix + "".join(random.choice(chars) for _ in range(44 - len(prefix)))
 
@@ -339,6 +420,7 @@ def _unpadded_rsa(exponent: int, n: int, plaintext: bytes) -> bytes:
 # ══════════════════════════════════════════════════════════════════════════════
 # EufyCloudClient
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class EufyCloudClient:
     """Synchronous client for reading/writing Eufy cloud settings via Tuya mobile API.
@@ -527,9 +609,9 @@ class EufyCloudClient:
         Only devices that expose a ``localKey`` are included.
         """
         # ── 1. Own devices (listed per home) ──────────────────────────────────
-        homes: list[dict] = self._tuya_request_with_retry(
-            "tuya.m.location.list", version="2.1"
-        ) or []
+        homes: list[dict] = (
+            self._tuya_request_with_retry("tuya.m.location.list", version="2.1") or []
+        )
 
         seen_ids: set[str] = set()
         devices: list[dict] = []
@@ -539,11 +621,14 @@ class EufyCloudClient:
             if not home_id:
                 continue
             try:
-                home_devices = self._tuya_request_with_retry(
-                    "tuya.m.my.group.device.list",
-                    version="1.0",
-                    extra_query={"gid": home_id},
-                ) or []
+                home_devices = (
+                    self._tuya_request_with_retry(
+                        "tuya.m.my.group.device.list",
+                        version="1.0",
+                        extra_query={"gid": home_id},
+                    )
+                    or []
+                )
                 for d in home_devices:
                     dev_id = d.get("devId")
                     if dev_id and dev_id not in seen_ids and d.get("localKey"):
@@ -554,9 +639,12 @@ class EufyCloudClient:
 
         # ── 2. Shared devices ─────────────────────────────────────────────────
         try:
-            shared: list[dict] = self._tuya_request_with_retry(
-                "tuya.m.my.shared.device.list", version="1.0"
-            ) or []
+            shared: list[dict] = (
+                self._tuya_request_with_retry(
+                    "tuya.m.my.shared.device.list", version="1.0"
+                )
+                or []
+            )
             for d in shared:
                 dev_id = d.get("devId")
                 if dev_id and dev_id not in seen_ids and d.get("localKey"):
@@ -569,11 +657,14 @@ class EufyCloudClient:
         return devices
 
     def get_settings(self) -> dict[str, Any]:
-        """Fetch DP154 + DP155 from the cloud and return decoded settings.
+        """Fetch DP155 from the cloud and return all decoded settings.
 
         Returns a dict with keys:
-            edge_mm, path_mm, travel_speed, blade_speed  (from DP155)
-            pad_direction                                 (from DP154, int 0–3)
+            edge_mm, path_mm, travel_speed, blade_speed, pad_direction  (all from DP155)
+
+        pad_direction is an integer angle in degrees (0–359).
+        Reference: 0 = west (9 o'clock), 90 = north (12 o'clock),
+                   180 = east (3 o'clock), 270 = south (6 o'clock).
         """
         dps = self._tuya_request_with_retry(
             "tuya.m.device.dp.get",
@@ -587,9 +678,8 @@ class EufyCloudClient:
             )
         settings = _decode_dp155(blob155)
 
-        # DP154 — pad direction (may be absent on older firmware; default to 0)
-        blob154 = dps.get("154")
-        settings["pad_direction"] = _decode_dp154(blob154) if blob154 else 0
+        # Ensure pad_direction always present (default 90 = north if field 4 absent)
+        settings.setdefault("pad_direction", 90)
 
         _LOGGER.debug("Cloud settings decoded: %s", settings)
         return settings
@@ -602,48 +692,44 @@ class EufyCloudClient:
         blade_speed: str | None = None,
         pad_direction: int | None = None,
     ) -> None:
-        """Write updated cloud settings to DP154 and/or DP155.
+        """Write updated cloud settings to DP155.
 
-        Only the DPs that have at least one changed value are written.
-        Unchanged fields within DP155 are read from the device first to preserve them.
+        All five settings are always written together.  Unchanged fields are
+        read from the device first to preserve them.
         """
-        # Read current values once so we can fill in any unchanged DP155 fields.
-        # We always need to read if DP155 will be written; also needed for pad_direction
-        # only if we want to avoid a stale read — but it's cheap to read once.
+        # Read current values so we can fill in any unchanged fields.
         current = self.get_settings()
 
-        # ── DP154: pad direction ───────────────────────────────────────────────
-        if pad_direction is not None:
-            blob154 = _encode_dp154(pad_direction)
-            _LOGGER.debug("Publishing DP154: pad_direction=%d", pad_direction)
-            self._tuya_request_with_retry(
-                "tuya.m.device.dp.publish",
-                data={
-                    "devId": self._device_id,
-                    "gwId":  self._device_id,
-                    "uid":   self._tuya_username,
-                    "dps":   {"154": blob154},
-                },
-            )
+        new_edge_mm = edge_mm if edge_mm is not None else current["edge_mm"]
+        new_path_mm = path_mm if path_mm is not None else current["path_mm"]
+        new_travel_speed = (
+            travel_speed if travel_speed is not None else current["travel_speed"]
+        )
+        new_blade_speed = (
+            blade_speed if blade_speed is not None else current["blade_speed"]
+        )
+        new_pad_direction = (
+            pad_direction if pad_direction is not None else current["pad_direction"]
+        )
 
-        # ── DP155: edge/path distance + travel/blade speed ────────────────────
-        if any(x is not None for x in (edge_mm, path_mm, travel_speed, blade_speed)):
-            new_edge_mm      = edge_mm      if edge_mm      is not None else current["edge_mm"]
-            new_path_mm      = path_mm      if path_mm      is not None else current["path_mm"]
-            new_travel_speed = travel_speed if travel_speed is not None else current["travel_speed"]
-            new_blade_speed  = blade_speed  if blade_speed  is not None else current["blade_speed"]
-
-            blob155 = _encode_dp155(new_edge_mm, new_path_mm, new_travel_speed, new_blade_speed)
-            _LOGGER.debug(
-                "Publishing DP155: edge=%dmm path=%dmm travel=%s blade=%s",
-                new_edge_mm, new_path_mm, new_travel_speed, new_blade_speed,
-            )
-            self._tuya_request_with_retry(
-                "tuya.m.device.dp.publish",
-                data={
-                    "devId": self._device_id,
-                    "gwId":  self._device_id,
-                    "uid":   self._tuya_username,
-                    "dps":   {"155": blob155},
-                },
-            )
+        blob155 = _encode_dp155(
+            new_edge_mm, new_path_mm, new_travel_speed, new_blade_speed,
+            new_pad_direction,
+        )
+        _LOGGER.debug(
+            "Publishing DP155: edge=%dmm path=%dmm travel=%s blade=%s pad=%d°",
+            new_edge_mm,
+            new_path_mm,
+            new_travel_speed,
+            new_blade_speed,
+            new_pad_direction,
+        )
+        self._tuya_request_with_retry(
+            "tuya.m.device.dp.publish",
+            data={
+                "devId": self._device_id,
+                "gwId": self._device_id,
+                "uid": self._tuya_username,
+                "dps": {"155": blob155},
+            },
+        )

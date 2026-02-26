@@ -10,6 +10,7 @@ Cloud entities (backed by DP154/DP155 via Tuya mobile API):
 
 Path distance is a fixed 3-option select; see select.py.
 """
+
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -57,6 +58,7 @@ async def async_setup_entry(
 
 # ── Local entity ───────────────────────────────────────────────────────────────
 
+
 class EufyCutHeightNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity):
     """Adjustable cut height for the Eufy E15 (local DPS 110)."""
 
@@ -75,7 +77,7 @@ class EufyCutHeightNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity)
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id   = f"{entry.data[CONF_DEVICE_ID]}_cut_height"
+        self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_cut_height"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])},
         )
@@ -91,6 +93,7 @@ class EufyCutHeightNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity)
 
 # ── Cloud entity ───────────────────────────────────────────────────────────────
 
+
 class EufyEdgeDistanceNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEntity):
     """How far inside (positive) or outside (negative) the border wire the mower cuts.
 
@@ -102,9 +105,9 @@ class EufyEdgeDistanceNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEnti
     _attr_name = "Edge Distance"
     _attr_icon = "mdi:border-outside"
     _attr_native_unit_of_measurement = UnitOfLength.CENTIMETERS
-    _attr_native_min_value = EDGE_DISTANCE_MIN    # -15 cm
-    _attr_native_max_value = EDGE_DISTANCE_MAX    #  15 cm
-    _attr_native_step      = EDGE_DISTANCE_STEP   #   1 cm
+    _attr_native_min_value = EDGE_DISTANCE_MIN  # -15 cm
+    _attr_native_max_value = EDGE_DISTANCE_MAX  #  15 cm
+    _attr_native_step = EDGE_DISTANCE_STEP  #   1 cm
     _attr_mode = NumberMode.SLIDER
 
     def __init__(
@@ -114,7 +117,7 @@ class EufyEdgeDistanceNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEnti
     ) -> None:
         super().__init__(coordinator)
         device_id = entry.data[CONF_DEVICE_ID]
-        self._attr_unique_id   = f"{device_id}_edge_distance"
+        self._attr_unique_id = f"{device_id}_edge_distance"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
 
     @property
@@ -147,18 +150,17 @@ class EufyPadDirectionNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEnti
     The app shows a rotary control for a full rotation.
 
     Confirmed encoding:
-        0°  →  b'\\x00'      (base64 "AA==")  — device-native quirk for 0
-        1°  →  b'\\x18\\x01' (base64 "GAE=")  — protobuf field 3 = 1
-        N°  →  protobuf field 3 = N           for N > 0
+        degrees 0 → b'\\x00'  (base64 "AA==")  — device-native quirk
+        degrees N → protobuf field 3 = N       for N > 0
     """
 
     _attr_has_entity_name = True
     _attr_name = "Pad Direction"
     _attr_icon = "mdi:rotate-right"
     _attr_native_unit_of_measurement = "°"
-    _attr_native_min_value = PAD_DIRECTION_MIN    #   0°
-    _attr_native_max_value = PAD_DIRECTION_MAX    # 359°
-    _attr_native_step      = PAD_DIRECTION_STEP   #   1°
+    _attr_native_min_value = PAD_DIRECTION_MIN  #   0°
+    _attr_native_max_value = PAD_DIRECTION_MAX  # 359°
+    _attr_native_step = PAD_DIRECTION_STEP  #   1°
     _attr_mode = NumberMode.SLIDER
 
     def __init__(
@@ -168,7 +170,7 @@ class EufyPadDirectionNumber(CoordinatorEntity[EufyMowerCoordinator], NumberEnti
     ) -> None:
         super().__init__(coordinator)
         device_id = entry.data[CONF_DEVICE_ID]
-        self._attr_unique_id   = f"{device_id}_pad_direction"
+        self._attr_unique_id = f"{device_id}_pad_direction"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
 
     @property
