@@ -88,10 +88,14 @@ CUT_HEIGHT_STEP = 5  # mm
 # ── Activity state logic ──────────────────────────────────────────────────────
 # Confirmed via live DPS monitoring:
 #
-#  DP1 absent,  DP2 absent                    → DOCKED  (cold / never started)
-#  DP1=True,    DP2=False,  DP118=0           → MOWING
-#  DP1=True,    DP2=False,  DP118 5–99        → RETURNING (progress back to base)
-#  DP1=True,    DP2=False,  DP118=100         → DOCKED  (returned after session)
-#  DP1=True,    DP2=True                      → PAUSED
+#  DP1 absent/False                            → DOCKED  (no active session)
+#  DP1=True,    DP2=False,  DP118=0            → MOWING
+#  DP1=True,    DP2=False,  DP118 5–99         → RETURNING (progress back to base)
+#  DP1=True,    DP2=False,  DP118=100          → MOWING  (returned to charge mid-session; will resume)
+#  DP1=True,    DP2=True                       → PAUSED
+#
+# NOTE: A previous version mapped (DP1=True, DP118=100) to DOCKED, which caused
+# the entity to remain "docked" once the mower briefly returned for charging
+# during an active session (issue #1). DP1 is the authoritative session flag.
 #
 RETURNING_THRESHOLD = 5  # DP118 ≥ this value while DP1 active = RETURNING

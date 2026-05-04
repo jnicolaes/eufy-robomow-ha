@@ -75,23 +75,27 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         dps = self.coordinator.data
         dp1   = dps.get(DP_TASK_ACTIVE, False)
         dp2   = dps.get(DP_PAUSED,      False)
-        dp118 = dps.get(DP_PROGRESS,    100)
+        # Default 0 (not 100): when DP118 is missing while a session is active,
+        # we should not assume the mower has finished and is docked.
+        dp118 = dps.get(DP_PROGRESS,    0)
 
-        # Paused: task active but movement stopped
-        if dp1 and dp2:
-            return LawnMowerActivity.PAUSED
+        # DP1=True means a session is running (mowing / returning / interrupted
+        # for charging within an active session). Only DP1=False means the
+        # mower is truly idle / docked.
+        if dp1:
+            # Paused: session active but movement stopped
+            if dp2:
+                return LawnMowerActivity.PAUSED
 
-        if dp1 and not dp2:
-            # DP118=100 → task finished, mower is back in dock
-            if dp118 >= 100:
-                return LawnMowerActivity.DOCKED
             # DP118 climbing (5–99) → mower returning to base
-            if dp118 >= RETURNING_THRESHOLD:
+            if RETURNING_THRESHOLD <= dp118 < 100:
                 try:
                     return LawnMowerActivity.RETURNING
                 except AttributeError:
                     return LawnMowerActivity.MOWING
-            # DP118 near 0 → actively mowing
+
+            # DP118 near 0 (mowing) or 100 (returned to charge mid-session,
+            # will resume) → actively mowing
             return LawnMowerActivity.MOWING
 
         # DP1 absent or False → no active session → docked / idle
