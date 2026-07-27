@@ -44,6 +44,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    if not coordinator.control_enabled:
+        return
     async_add_entities(
         [
             EufySwitch(coordinator, entry, key, dp, name, icon, enabled)

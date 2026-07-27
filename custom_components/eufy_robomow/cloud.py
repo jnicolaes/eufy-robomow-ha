@@ -25,6 +25,7 @@ All API calls are synchronous; callers must run them in an executor thread
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac as _hmac_module
 import json
@@ -156,14 +157,16 @@ def _varint_decode(data: bytes, pos: int) -> tuple[int, int]:
     """Decode a varint starting at *pos*. Returns (value, new_pos)."""
     result = 0
     shift = 0
-    while True:
+    for _ in range(10):
+        if pos >= len(data):
+            raise ValueError("Truncated protobuf varint")
         b = data[pos]
         pos += 1
         result |= (b & 0x7F) << shift
         if not (b & 0x80):
-            break
+            return result, pos
         shift += 7
-    return result, pos
+    raise ValueError("Protobuf varint exceeds 10 bytes")
 
 
 def _encode_field(field_num: int, wire_type: int, value: bytes | int) -> bytes:
@@ -223,7 +226,10 @@ def _encode_dp155(
 
 def _decode_dp155(blob: str) -> dict[str, Any]:
     """Decode a DP155 base64 blob and return the four cloud settings."""
-    data = base64.b64decode(blob)
+    try:
+        data = base64.b64decode(blob, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("DP155 is not valid base64") from exc
     pos = 0
     settings: dict[str, Any] = {}
 

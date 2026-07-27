@@ -20,6 +20,8 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
+    CONF_OPERATING_MODE,
+    DEFAULT_OPERATING_MODE,
 )
 from .coordinator import EufyMowerCoordinator
 
@@ -55,6 +57,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id=entry.data[CONF_DEVICE_ID],
         local_key=entry.data[CONF_LOCAL_KEY],
         cloud_client=cloud_client,
+        operating_mode=entry.options.get(
+            CONF_OPERATING_MODE,
+            entry.data.get(CONF_OPERATING_MODE, DEFAULT_OPERATING_MODE),
+        ),
     )
 
     # Initial data fetch — raises ConfigEntryNotReady if the mower is unreachable

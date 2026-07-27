@@ -14,8 +14,14 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_HOST
+from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -24,6 +30,9 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
+    CONF_OPERATING_MODE,
+    DEFAULT_OPERATING_MODE,
+    OPERATING_MODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +84,14 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
         self._email:      str        = ""
         self._password:   str        = ""
         self._discovered: list[dict] = []  # Tuya device dicts
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> EufyRobomowOptionsFlow:
+        """Create the options flow."""
+        return EufyRobomowOptionsFlow()
 
     # ── Step 1: credentials ───────────────────────────────────────────────────
 
@@ -172,6 +189,7 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_LOCAL_KEY:     local_key,
                         CONF_EUFY_EMAIL:    self._email,
                         CONF_EUFY_PASSWORD: self._password,
+                        CONF_OPERATING_MODE: DEFAULT_OPERATING_MODE,
                     },
                 )
 
@@ -185,6 +203,33 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(step_schema, suggested),
             errors=errors,
             description_placeholders={"device_count": str(len(self._discovered))},
+        )
+
+
+class EufyRobomowOptionsFlow(OptionsFlowWithReload):
+    """Manage safety-sensitive integration options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure the integration operating mode."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current_mode = self.config_entry.options.get(
+            CONF_OPERATING_MODE,
+            self.config_entry.data.get(CONF_OPERATING_MODE, DEFAULT_OPERATING_MODE),
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_OPERATING_MODE): vol.In(OPERATING_MODES),
+            }
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                schema, {CONF_OPERATING_MODE: current_mode}
+            ),
         )
 
 

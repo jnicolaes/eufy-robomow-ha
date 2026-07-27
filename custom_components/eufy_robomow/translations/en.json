@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Eufy Robomow — Sign in",
-        "description": "Sign in with your Eufy account to discover your mower and unlock all cloud-managed settings (edge distance, path distance, travel speed, blade speed, pad direction).",
+        "description": "Sign in with your Eufy account to discover your mower and unlock cloud-managed settings.",
         "data": {
           "eufy_email": "Eufy account email",
           "eufy_password": "Eufy account password"
@@ -11,7 +11,7 @@
       },
       "device": {
         "title": "Eufy Robomow — Select mower",
-        "description": "Found {device_count} device(s) in your account. Select your mower and enter its local IP address (check your router's DHCP table if unsure).",
+        "description": "Found {device_count} device(s). Select your mower and enter its local IP address.",
         "data": {
           "device_id": "Mower",
           "host": "IP address of the mower"
@@ -19,13 +19,27 @@
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to the mower. Check the IP address and make sure it is on WiFi.",
+      "cannot_connect": "Cannot connect to the mower. Check the IP address and Wi-Fi connection.",
       "invalid_auth": "Could not sign in. Check your email and password.",
       "no_devices": "No compatible devices found in this account.",
       "unknown": "Unexpected error. Check the Home Assistant logs for details."
     },
     "abort": {
       "already_configured": "This mower is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Eufy Robomow operating mode",
+        "description": "Observe-only disables every mower and settings write. Enable control only after read-only telemetry has been validated on your mower.",
+        "data": {
+          "operating_mode": "Operating mode"
+        },
+        "data_description": {
+          "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes."
+        }
+      }
     }
   },
   "entity": {
@@ -35,19 +49,19 @@
       }
     },
     "sensor": {
-      "battery":     { "name": "Battery" },
-      "mowed_area":  { "name": "Mowed Area" },
-      "progress":    { "name": "Progress" },
-      "network":     { "name": "Network" }
+      "battery": { "name": "Battery" },
+      "mowed_area": { "name": "Mowed Area" },
+      "progress": { "name": "Progress" },
+      "network": { "name": "Network" }
     },
     "number": {
-      "cut_height":    { "name": "Cut Height" },
+      "cut_height": { "name": "Cut Height" },
       "edge_distance": { "name": "Edge Distance" },
       "pad_direction": { "name": "Pad Direction" }
     },
     "select": {
-      "travel_speed":  { "name": "Travel Speed" },
-      "blade_speed":   { "name": "Blade Speed" },
+      "travel_speed": { "name": "Travel Speed" },
+      "blade_speed": { "name": "Blade Speed" },
       "path_distance": { "name": "Path Distance" }
     }
   }

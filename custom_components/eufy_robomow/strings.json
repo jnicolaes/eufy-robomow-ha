@@ -28,6 +28,20 @@
       "already_configured": "This mower is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Eufy Robomow operating mode",
+        "description": "Observe-only disables every mower and settings write. Enable control only after read-only telemetry has been validated on your mower.",
+        "data": {
+          "operating_mode": "Operating mode"
+        },
+        "data_description": {
+          "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes."
+        }
+      }
+    }
+  },
   "entity": {
     "lawn_mower": {
       "lawn_mower": {

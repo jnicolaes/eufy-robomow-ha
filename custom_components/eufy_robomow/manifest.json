@@ -3,10 +3,10 @@
   "name": "Eufy Robomow",
   "version": "0.4.0",
   "config_flow": true,
-  "documentation": "https://github.com/jnicolaes/eufy-robomow-ha",
-  "issue_tracker": "https://github.com/jnicolaes/eufy-robomow-ha/issues",
-  "requirements": ["tinytuya>=1.13.0", "requests>=2.31.0"],
+  "documentation": "https://github.com/keesmod/eufy-robomow-ha",
+  "issue_tracker": "https://github.com/keesmod/eufy-robomow-ha/issues",
+  "requirements": ["tinytuya==1.20.0"],
   "dependencies": [],
-  "codeowners": ["@jnicolaes"],
+  "codeowners": ["@keesmod"],
   "iot_class": "local_polling"
 }

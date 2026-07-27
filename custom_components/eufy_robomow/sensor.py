@@ -5,8 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
-import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -33,7 +32,6 @@ from .const import (
     DP_SIGNAL,
     DP_LIVE_VIEW,
     DP_TASK_ACTIVE,
-    GENERIC_SENSOR_PREFIX,
 )
 from .coordinator import EufyMowerCoordinator
 
@@ -153,7 +151,8 @@ def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
     """Read a protobuf varint from *data* at *pos*. Returns (value, new_pos)."""
     result = shift = 0
     while pos < len(data):
-        b = data[pos]; pos += 1
+        b = data[pos]
+        pos += 1
         result |= (b & 0x7F) << shift
         if not (b & 0x80):
             break
@@ -173,13 +172,15 @@ def _proto_flat(data: bytes) -> dict[int, Any]:
     while pos < len(data):
         try:
             tag, pos = _read_varint(data, pos)
-            fn = tag >> 3; wt = tag & 7
+            fn = tag >> 3
+            wt = tag & 7
             if wt == 0:
                 val, pos = _read_varint(data, pos)
                 fields[fn] = val
             elif wt == 2:
                 length, pos = _read_varint(data, pos)
-                fields[fn] = data[pos:pos + length]; pos += length
+                fields[fn] = data[pos : pos + length]
+                pos += length
             elif wt == 1:
                 pos += 8   # fixed64 — skip
             elif wt == 5:
@@ -322,7 +323,7 @@ def _decode_blob(value: Any) -> str:
                 text = decoded.decode("utf-8")
                 if all(32 <= ord(c) < 127 or c in "\n\r\t" for c in text):
                     return f"<text> {text}"
-            except:
+            except UnicodeDecodeError:
                 pass
 
             # Return hex representation for binary data

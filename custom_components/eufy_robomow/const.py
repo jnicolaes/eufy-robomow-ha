@@ -21,6 +21,13 @@ CONF_DEVICE_ID = "device_id"
 CONF_LOCAL_KEY = "local_key"
 CONF_EUFY_EMAIL = "eufy_email"  # optional — enables cloud settings
 CONF_EUFY_PASSWORD = "eufy_password"  # optional — enables cloud settings
+CONF_OPERATING_MODE = "operating_mode"
+
+# Physical commands and setting writes are opt-in while the integration is alpha.
+OPERATING_MODE_OBSERVE_ONLY = "observe_only"
+OPERATING_MODE_CONTROL = "control"
+OPERATING_MODES = [OPERATING_MODE_OBSERVE_ONLY, OPERATING_MODE_CONTROL]
+DEFAULT_OPERATING_MODE = OPERATING_MODE_OBSERVE_ONLY
 
 # ── Cloud settings poll interval ───────────────────────────────────────────────
 # Cloud settings are fetched at most once every N seconds (much slower than local).

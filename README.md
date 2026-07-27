@@ -1,8 +1,6 @@
 # Eufy Robomow — Home Assistant Integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-
-A Home Assistant custom integration for the **Eufy E15** and **E18** robotic lawn mowers.
+A Home Assistant custom integration for the **Eufy E15** robotic lawn mower. The design is capability-driven for possible E18 support, but E18 support is not yet hardware-validated or claimed.
 
 Control and monitor your Eufy mower directly from Home Assistant over your local network, with cloud-synced settings pulled straight from your Eufy account — no extra tools or manual key extraction required.
 
@@ -12,7 +10,7 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 
 | Entity | Type | Description |
 |--------|------|-------------|
-| Mower | `lawn_mower` | Start, pause, dock — with activity state (mowing / returning / docked / paused) |
+| Mower | `lawn_mower` | Activity state; start, pause, and dock after control is explicitly enabled |
 | Battery | `sensor` | Battery level (%) |
 | Mowed Area | `sensor` | Area covered in the current or last session |
 | Mowing Progress | `sensor` | Real-time session completion % (from DP113 telemetry blob) |
@@ -42,23 +40,18 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 
 - **Local network access** — the mower and Home Assistant must be on the same LAN (or the mower reachable via IP).
 - **Eufy account** — required for cloud-managed settings. The same email/password you use in the Eufy Home app.
-- HA **2024.1** or newer.
+- Home Assistant **2026.7** or newer during private alpha development.
 
 ---
 
 ## Installation
 
-### Via HACS (recommended)
-
-1. Open HACS → **Integrations** → ⋮ → **Custom repositories**
-2. Add URL: `https://github.com/jnicolaes/eufy-robomow-ha` — category: **Integration**
-3. Search for **Eufy Robomow** and install
-4. Restart Home Assistant
-
-### Manual
+### Private development installation
 
 1. Copy the `custom_components/eufy_robomow/` folder into your HA `config/custom_components/` directory
 2. Restart Home Assistant
+
+HACS packaging is intentionally deferred until the private integration has passed protocol, safety, and reliability validation.
 
 ---
 
@@ -74,13 +67,17 @@ Pick your mower from the dropdown and enter its local IP address (find it in you
 
 That's it — no external tools, no manual key extraction.
 
+New entries start in **observe-only** mode. In this mode the mower entity reports state, but physical commands and settings-write entities are disabled. After supervised read-only validation, use **Settings → Devices & Services → Eufy Robomow → Configure** to opt in to control.
+
+> **Alpha credential notice:** the current cloud client still stores the Eufy account password in the Home Assistant config entry so it can renew sessions. Restrict access to Home Assistant backups and `.storage`; replacing this with renewable session material is tracked as a separate hardening change.
+
 ---
 
 ## How it works
 
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
-- **Writes** go directly to the cloud API and are immediately reflected in the Eufy app.
+- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting.
 
 ---
 

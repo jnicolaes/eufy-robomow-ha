@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
@@ -32,7 +31,7 @@ async def async_setup_entry(
     """Set up select entities — cloud settings only (require cloud credentials)."""
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    if coordinator.cloud_client is not None:
+    if coordinator.control_enabled and coordinator.cloud_client is not None:
         async_add_entities(
             [
                 EufyPathDistanceSelect(coordinator, entry),
@@ -68,9 +67,7 @@ class EufyCloudSelect(SelectEntity):
         return f"{self._entry.data[CONF_DEVICE_ID]}_{self._setting_name}"
 
     @property
-    def device_info(self):
-        from homeassistant.helpers.device_registry import DeviceInfo
-
+    def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.data[CONF_DEVICE_ID])},
         )

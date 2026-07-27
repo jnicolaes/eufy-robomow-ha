@@ -9,7 +9,6 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -47,7 +46,7 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     _attr_has_entity_name = True
     _attr_translation_key = "lawn_mower"
     _attr_icon = "mdi:robot-mower"
-    _attr_supported_features = (
+    _CONTROL_FEATURES = (
         LawnMowerEntityFeature.START_MOWING
         | LawnMowerEntityFeature.PAUSE
         | LawnMowerEntityFeature.DOCK
@@ -67,6 +66,13 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             manufacturer="Eufy (Anker)",
             model="E15",
         )
+
+    @property
+    def supported_features(self) -> LawnMowerEntityFeature:
+        """Expose controls only after the user explicitly opts in."""
+        if not self.coordinator.control_enabled:
+            return LawnMowerEntityFeature(0)
+        return self._CONTROL_FEATURES
 
     # ── activity ──────────────────────────────────────────────────────────────
 

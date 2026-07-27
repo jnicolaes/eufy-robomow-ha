@@ -10,6 +10,7 @@ from datetime import timedelta
 import tinytuya
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -23,6 +24,7 @@ from .const import (
     CLOUD_TRAVEL_SPEED,
     CLOUD_BLADE_SPEED,
     CLOUD_PAD_DIRECTION,
+    OPERATING_MODE_CONTROL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         device_id: str,
         local_key: str,
         cloud_client=None,  # EufyCloudClient | None  (avoid circular import)
+        operating_mode: str = "observe_only",
     ) -> None:
         super().__init__(
             hass,
@@ -61,6 +64,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.device_id = device_id
         self.local_key = local_key
         self.cloud_client = cloud_client
+        self.operating_mode = operating_mode
 
         self._device = self._make_device()
         # Use float('-inf') so the first poll always fetches cloud DPS
@@ -75,6 +79,19 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         # Registered by sensor.py so it can add generic sensors on-the-fly.
         # Callbacks receive the current dps dict as their sole argument.
         self._new_dp_callbacks: list = []
+
+    @property
+    def control_enabled(self) -> bool:
+        """Return whether physical and settings writes are explicitly enabled."""
+        return self.operating_mode == OPERATING_MODE_CONTROL
+
+    def _require_control_enabled(self) -> None:
+        """Reject writes while the integration is in its safe default mode."""
+        if not self.control_enabled:
+            raise HomeAssistantError(
+                "Eufy Robomow is in observe-only mode. Enable control in the "
+                "integration options before sending commands."
+            )
 
     def async_add_new_dp_listener(self, callback) -> None:
         """Register *callback(dps)* to be called whenever new DPS keys are discovered.
@@ -148,7 +165,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         dps: dict = result.get("dps", {})
         local_dp_keys: set[str] = set(dps.keys())
 
-        _LOGGER.debug("Local DPS update: %s", dps)
+        _LOGGER.debug("Local DPS update received (%d keys)", len(dps))
 
         # ── 2. Cloud DPS + settings (every CLOUD_POLL_INTERVAL seconds) ───────
         # Two guards before attempting a cloud poll:
@@ -232,8 +249,6 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 "New DPS discovered: %s",
                 sorted(new_keys, key=_dp_sort_key),
             )
-            for k in sorted(new_keys, key=_dp_sort_key):
-                _LOGGER.info("  DP%s = %r (%s)", k, dps[k], type(dps[k]).__name__)
             # Pass the current full dps dict so callbacks don't read stale data
             for cb in list(self._new_dp_callbacks):
                 cb(dps)
@@ -257,32 +272,37 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     # ── commands ──────────────────────────────────────────────────────────────
 
-    async def async_send_command(self, dp: str, value) -> bool:
-        """Write a single DPS value to the device. Returns True on success."""
+    async def async_send_command(self, dp: str, value) -> None:
+        """Write a single DPS value or raise a visible Home Assistant error."""
+        self._require_control_enabled()
         _LOGGER.debug("Sending command DP %s = %s", dp, value)
         try:
             result = await self.hass.async_add_executor_job(
                 self._device.set_value, int(dp), value
             )
+            if isinstance(result, dict) and "Error" in result:
+                raise HomeAssistantError(
+                    f"Mower rejected command DP {dp}: {result['Error']}"
+                )
             _LOGGER.debug("Command result: %s", result)
             # Immediately refresh state
             await self.async_request_refresh()
-            return True
+        except HomeAssistantError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("Command DP %s = %s failed: %s", dp, value, exc)
-            return False
+            raise HomeAssistantError(f"Mower command DP {dp} failed: {exc}") from exc
 
-    async def async_set_cloud_setting(self, **kwargs) -> bool:
+    async def async_set_cloud_setting(self, **kwargs) -> None:
         """Write one or more cloud settings via the Tuya mobile API.
 
         Keyword arguments: edge_mm, path_mm, travel_speed, blade_speed, pad_direction.
-        Returns True on success.
+        Raises a visible Home Assistant error when the write is not confirmed.
         """
+        self._require_control_enabled()
         if not self.cloud_client:
-            _LOGGER.error(
-                "async_set_cloud_setting called but no cloud client configured"
+            raise HomeAssistantError(
+                "Cloud settings are unavailable because no cloud client is configured."
             )
-            return False
 
         def _do_set() -> None:
             self.cloud_client.set_settings(**kwargs)
@@ -294,7 +314,6 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             # Force a cloud re-fetch on the next poll cycle
             self._cloud_last_fetch = float("-inf")
             await self.async_request_refresh()
-            return True
         except Exception as exc:  # noqa: BLE001
             exc_str = str(exc)
             if "DEVICE_OFFLINE" in exc_str or "offline" in exc_str.lower():
@@ -304,4 +323,4 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 )
             else:
                 _LOGGER.error("Cloud setting update failed: %s", exc)
-            return False
+            raise HomeAssistantError(f"Cloud setting update failed: {exc}") from exc
