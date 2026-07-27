@@ -29,6 +29,7 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 | Child Protection | `switch` | Enable child/pet protection mode |
 | Smart No-Go Suggestions | `switch` | AI-assisted no-go zone suggestions |
 | Mow Yellow Grass | `switch` | Allow mowing on dry/yellow grass |
+| Map | `image` | Optional read-only E15 boundary, areas, pathways, mower and cleaning path |
 
 > **Cloud entities** (edge distance, pad direction, speeds, path distance) require your Eufy account credentials. They are polled every 5 minutes and written back via the Tuya mobile API.
 >
@@ -71,6 +72,42 @@ New entries start in **observe-only** mode. In this mode the mower entity report
 
 > **Alpha credential notice:** the current cloud client still stores the Eufy account password in the Home Assistant config entry so it can renew sessions. Restrict access to Home Assistant backups and `.storage`; replacing this with renewable session material is tracked as a separate hardening change.
 
+### Optional read-only map
+
+E15 maps use a separate Tuya P2P media transport that is not available through
+the mower's normal local DPS connection. This integration can consume a
+compatible map source without bundling that transport or its Android-only
+vendor libraries.
+
+Configure the source under **Settings → Devices & Services → Eufy Robomow →
+Configure**:
+
+- **Map source HTTPS URL** — base URL of the map source.
+- **Certificate SHA-256 fingerprint** — optional pin for private or self-signed
+  TLS. Normal certificate validation is used when this is empty.
+
+Authentication is derived from the mower's existing local key; no additional
+token is stored. The source must expose `GET /v1/map` with content type
+`application/vnd.eufy-robomow-map+zip`, support `ETag` responses, and use the
+`X-Eufy-Map-Mode` request header (`idle` or `stream`) to control its read-only
+P2P session. The stored ZIP contains a manifest and exactly these three files:
+
+- `map.bin.stream`
+- `cleanPath.bin.stream`
+- `navPath.bin.stream`
+
+Home Assistant validates the archive, device binding, sizes, hashes, protobuf
+and boundary before displaying it. One latest-good bundle is stored privately
+under `/config/eufy_robomow_maps/`. If acquisition fails, the previous valid map
+remains available. Idle maps refresh every five minutes. During an active mowing
+task, Home Assistant requests changed stream snapshots every two seconds,
+accumulates and deduplicates coverage deltas, and renders the newest mower pose.
+Clear the source URL to remove the map entity; no mower setting or geometry is
+changed.
+
+Map bundles contain private lawn geometry. Never commit them, attach them to an
+issue or include them in diagnostics.
+
 ---
 
 ## How it works
@@ -78,13 +115,16 @@ New entries start in **observe-only** mode. In this mode the mower entity report
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
 - **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting.
+- **Optional map acquisition** uses five-minute idle snapshots and two-second
+  `ETag`-aware live pulls while mowing, then renders the validated geometry
+  locally as a script-free SVG.
 
 ---
 
 ## Known limitations
 
 - **Zone mowing** — the local Tuya protocol cannot distinguish zone 1 from zone 2 (both send an identical DP154 value; zone selection happens over cloud MQTT which is not locally accessible). Full-area mow only for now.
-- **Map display** — live GPS map is not yet supported.
+- **Map acquisition** — experimental and requires a separate compatible source because Tuya publishes the required P2P transport only through its Android media stack.
 
 ---
 

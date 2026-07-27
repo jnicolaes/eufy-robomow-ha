@@ -21,6 +21,8 @@ CONF_DEVICE_ID = "device_id"
 CONF_LOCAL_KEY = "local_key"
 CONF_EUFY_EMAIL = "eufy_email"  # optional — enables cloud settings
 CONF_EUFY_PASSWORD = "eufy_password"  # optional — enables cloud settings
+CONF_MAP_SOURCE_URL = "map_source_url"
+CONF_MAP_CERTIFICATE_FINGERPRINT = "map_certificate_fingerprint"
 CONF_OPERATING_MODE = "operating_mode"
 
 # Physical commands and setting writes are opt-in while the integration is alpha.

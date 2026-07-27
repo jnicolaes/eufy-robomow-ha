@@ -1,7 +1,7 @@
 {
   "domain": "eufy_robomow",
   "name": "Eufy Robomow",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "config_flow": true,
   "documentation": "https://github.com/keesmod/eufy-robomow-ha",
   "issue_tracker": "https://github.com/keesmod/eufy-robomow-ha/issues",

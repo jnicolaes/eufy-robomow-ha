@@ -31,18 +31,30 @@
   "options": {
     "step": {
       "init": {
-        "title": "Eufy Robomow operating mode",
-        "description": "Observe-only disables every mower and settings write. Enable control only after read-only telemetry has been validated on your mower.",
+        "title": "Eufy Robomow options",
+        "description": "Observe-only disables mower and settings writes. The optional map source is always read-only; leave its URL empty to disable the map entity.",
         "data": {
-          "operating_mode": "Operating mode"
+          "operating_mode": "Operating mode",
+          "map_source_url": "Map source HTTPS URL",
+          "map_certificate_fingerprint": "Certificate SHA-256 fingerprint (optional)"
         },
         "data_description": {
-          "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes."
+          "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes.",
+          "map_source_url": "Base URL of a compatible E15 map source.",
+          "map_certificate_fingerprint": "Optional pin for a private or self-signed TLS certificate."
         }
       }
+    },
+    "error": {
+      "invalid_map_source": "The map source URL or certificate fingerprint is invalid."
     }
   },
   "entity": {
+    "image": {
+      "map": {
+        "name": "Map"
+      }
+    },
     "lawn_mower": {
       "lawn_mower": {
         "name": "Mower"
