@@ -8,7 +8,9 @@ import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
+from stat import S_IMODE
 from typing import cast
+from unittest.mock import patch
 from zipfile import ZIP_STORED, ZipFile
 
 import aiohttp
@@ -21,6 +23,7 @@ from custom_components.eufy_robomow.map_source import (
     MapSource,
     MapSourceError,
     MapSourceSettings,
+    _MapFetch,
     decode_map_bundle,
     read_cached_bundle,
     write_cached_bundle,
@@ -57,6 +60,7 @@ def _snapshot_digest(payloads: dict[str, bytes]) -> str:
 def _bundle(
     *,
     device_id: str = _DEVICE_ID,
+    captured_at: int = 1_700_000_000,
     mutate_manifest: object | None = None,
     extra_member: bool = False,
 ) -> bytes:
@@ -64,7 +68,7 @@ def _bundle(
     manifest: object = {
         "schema_version": 1,
         "device_id": device_id,
-        "captured_at": 1_700_000_000,
+        "captured_at": captured_at,
         "snapshot_id": _snapshot_digest(payloads),
         "files": {
             filename: {
@@ -115,13 +119,19 @@ def test_decode_map_bundle_rejects_invalid_manifest() -> None:
 
 
 def test_cache_round_trip_is_single_atomic_file(tmp_path: Path) -> None:
-    cache_file = tmp_path / "private" / "latest.mapbundle"
+    cache_root = tmp_path / "eufy_robomow_maps"
+    cache_root.mkdir(mode=0o777)
+    cache_root.chmod(0o777)
+    cache_file = cache_root / "entry" / "latest.mapbundle"
     encoded = _bundle()
 
-    write_cached_bundle(cache_file, encoded)
+    write_cached_bundle(cache_file, encoded, cache_root)
 
     assert read_cached_bundle(cache_file) == encoded
     assert list(cache_file.parent.iterdir()) == [cache_file]
+    assert S_IMODE(cache_root.stat().st_mode) == 0o700
+    assert S_IMODE(cache_file.parent.stat().st_mode) == 0o700
+    assert S_IMODE(cache_file.stat().st_mode) == 0o600
 
 
 def test_map_source_settings_are_optional() -> None:
@@ -176,16 +186,23 @@ class _FakeHass:
 
 
 class _StaticMapSource(MapSource):
-    def __init__(self, *args, response: bytes | BaseException, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        response: bytes | BaseException,
+        response_etag: str | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._response = response
+        self._response_etag = response_etag
         self.streaming_requests: list[bool] = []
 
-    async def _async_fetch(self, *, streaming: bool) -> bytes:
+    async def _async_fetch(self, *, streaming: bool) -> _MapFetch:
         self.streaming_requests.append(streaming)
         if isinstance(self._response, BaseException):
             raise self._response
-        return self._response
+        return _MapFetch(self._response, self._response_etag)
 
 
 def _settings() -> MapSourceSettings:
@@ -233,6 +250,45 @@ def test_map_source_throttles_idle_and_switches_to_streaming(tmp_path: Path) -> 
     assert source.streaming_requests == [False, True]
 
 
+def test_map_source_backs_off_before_first_success(tmp_path: Path) -> None:
+    source = _StaticMapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=tmp_path / "latest.mapbundle",
+        response=aiohttp.ClientConnectionError("synthetic failure"),
+    )
+
+    with pytest.raises(MapSourceError, match="No valid"):
+        asyncio.run(source.async_refresh(streaming=True))
+    with pytest.raises(MapSourceError, match="transport failed"):
+        asyncio.run(source.async_refresh(streaming=True))
+
+    assert source.streaming_requests == [True]
+
+
+def test_map_source_rejects_older_snapshot(tmp_path: Path) -> None:
+    source = _StaticMapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=tmp_path / "latest.mapbundle",
+        response=_bundle(captured_at=1_700_000_001),
+        response_etag='"new"',
+    )
+
+    current = asyncio.run(source.async_refresh())
+    source._response = _bundle(captured_at=1_700_000_000)
+    source._response_etag = '"old"'
+    retained = asyncio.run(source.async_refresh(streaming=True))
+
+    assert retained is current
+    assert retained.captured_at == datetime.fromtimestamp(1_700_000_001, tz=UTC)
+    assert source.status.state == "stale"
+    assert source.status.last_error == "Map source returned an older snapshot"
+    assert source._etags == {False: '"new"'}
+
+
 def test_map_source_retains_cached_map_after_transport_failure(
     tmp_path: Path,
 ) -> None:
@@ -251,3 +307,73 @@ def test_map_source_retains_cached_map_after_transport_failure(
     assert loaded.snapshot.map_id == 539
     assert source.status.state == "stale"
     assert source.status.last_error == "Map source transport failed"
+
+
+class _FakeResponse:
+    def __init__(
+        self,
+        *,
+        status: int,
+        body: bytes = b"",
+        etag: str | None = None,
+    ) -> None:
+        self.status = status
+        self.headers = {
+            "Content-Type": MAP_BUNDLE_CONTENT_TYPE,
+            **({"ETag": etag} if etag is not None else {}),
+        }
+        self.content_length = len(body)
+        self.content = self
+        self._body = body
+
+    async def __aenter__(self) -> _FakeResponse:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+    async def read(self, size: int) -> bytes:
+        return self._body
+
+
+class _FakeSession:
+    def __init__(self, responses: list[_FakeResponse]) -> None:
+        self._responses = responses
+        self.request_headers: list[dict[str, str]] = []
+
+    def get(self, url: str, **kwargs: object) -> _FakeResponse:
+        headers = cast(dict[str, str], kwargs["headers"])
+        self.request_headers.append(dict(headers))
+        return self._responses.pop(0)
+
+
+def test_map_source_tracks_etags_per_mode(tmp_path: Path) -> None:
+    session = _FakeSession(
+        [
+            _FakeResponse(status=200, body=_bundle(), etag='"idle"'),
+            _FakeResponse(status=200, body=_bundle(), etag='"stream"'),
+            _FakeResponse(status=304),
+            _FakeResponse(status=304),
+        ]
+    )
+    source = MapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=tmp_path / "latest.mapbundle",
+    )
+
+    with patch(
+        "custom_components.eufy_robomow.map_source.async_get_clientsession",
+        return_value=session,
+    ):
+        idle = asyncio.run(source._async_fetch(streaming=False))
+        stream = asyncio.run(source._async_fetch(streaming=True))
+        source._etags[False] = idle.etag or ""
+        source._etags[True] = stream.etag or ""
+        asyncio.run(source._async_fetch(streaming=False))
+        asyncio.run(source._async_fetch(streaming=True))
+
+    assert [
+        headers.get("If-None-Match") for headers in session.request_headers
+    ] == [None, None, '"idle"', '"stream"']

@@ -53,13 +53,8 @@ async def async_setup_entry(
         return
 
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    cache_file = Path(
-        hass.config.path(
-            MAP_CACHE_DIRECTORY,
-            entry.entry_id,
-            "latest.mapbundle",
-        )
-    )
+    cache_root = Path(hass.config.path(MAP_CACHE_DIRECTORY))
+    cache_file = cache_root / entry.entry_id / "latest.mapbundle"
     async_add_entities(
         [
             EufyRobomowMapImage(
@@ -70,6 +65,7 @@ async def async_setup_entry(
                     settings=settings,
                     device_id=entry.data[CONF_DEVICE_ID],
                     cache_file=cache_file,
+                    cache_root=cache_root,
                 ),
                 entry,
             )

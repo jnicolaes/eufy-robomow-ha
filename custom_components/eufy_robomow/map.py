@@ -305,8 +305,9 @@ def _decode_position(
 ) -> Point | None:
     encoded_x = message.integer(x_field)
     encoded_y = message.integer(y_field)
-    if not allow_omitted_zero and encoded_x is None and encoded_y is None:
-        return None
+    if encoded_x is None and encoded_y is None:
+        if not allow_omitted_zero or message.fields:
+            return None
     return Point(
         x=_decode_sint32(encoded_x or 0),
         y=_decode_sint32(encoded_y or 0),

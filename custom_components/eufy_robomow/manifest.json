@@ -1,11 +1,11 @@
 {
   "domain": "eufy_robomow",
   "name": "Eufy Robomow",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "config_flow": true,
   "documentation": "https://github.com/keesmod/eufy-robomow-ha",
   "issue_tracker": "https://github.com/keesmod/eufy-robomow-ha/issues",
-  "requirements": ["tinytuya==1.20.0"],
+  "requirements": ["requests==2.34.2", "tinytuya==1.20.0"],
   "dependencies": [],
   "codeowners": ["@keesmod"],
   "iot_class": "local_polling"

@@ -80,7 +80,12 @@ Pick your mower from the dropdown and enter its local IP address (find it in you
 
 That's it — no external tools, no manual key extraction.
 
-New entries start in **observe-only** mode. In this mode the mower entity reports state, but physical commands and settings-write entities are disabled. After supervised read-only validation, use **Settings → Devices & Services → Eufy Robomow → Configure** to opt in to control.
+New entries start in **observe-only** mode. Entries upgraded from the original
+integration also start in observe-only when they do not yet have an explicit
+operating mode. In this mode the mower entity reports state, but physical
+commands and settings-write entities are disabled. After supervised read-only
+validation, use **Settings → Devices & Services → Eufy Robomow → Configure** to
+opt in to control.
 
 > **Alpha credential notice:** the current cloud client still stores the Eufy account password in the Home Assistant config entry so it can renew sessions. Restrict access to Home Assistant backups and `.storage`; replacing this with renewable session material is tracked as a separate hardening change.
 
@@ -131,12 +136,18 @@ issue or include them in diagnostics.
   `ETag`-aware live pulls while mowing, then renders the validated geometry
   locally as a script-free SVG.
 
+Runtime dependencies are pinned to the versions validated with Home Assistant
+2026.7.1 and the E15's Tuya 3.5 transport. `requests` is declared directly;
+TinyTuya remains pinned to 1.20.0 until another version passes the same local
+protocol tests.
+
 ---
 
 ## Known limitations
 
 - **Zone mowing** — the local Tuya protocol cannot distinguish zone 1 from zone 2 (both send an identical DP154 value; zone selection happens over cloud MQTT which is not locally accessible). Full-area mow only for now.
 - **Map acquisition** — experimental and requires a separate compatible source because Tuya publishes the required P2P transport only through its Android media stack.
+- **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---
 

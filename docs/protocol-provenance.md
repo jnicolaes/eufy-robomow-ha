@@ -29,3 +29,18 @@ Never commit raw captures. Remove passwords, tokens, local keys, full device and
 ## Other repositories
 
 Unlicensed projects and forks may be used to enumerate features and design experiments. Do not copy or mechanically translate their implementation, constants, schemas, fixtures, or tests. Record independently reproduced facts in this repository's own evidence trail.
+
+## Current map-position interpretation
+
+The E15 map record's field 8 and the latest clean-path position have been
+repeatedly observed against the iOS app, but their dual live-session semantics
+are not documented by Eufy or Tuya. The renderer therefore treats:
+
+- map-record field 8 as the idle mower pose;
+- the latest clean-path position as the live mower pose while mowing; and
+- map-record field 8 as the charging-station marker during that live view.
+
+This is an `observed` presentation rule, not a confirmed protocol contract. The
+fixed SVG marker offset is visual alignment for the renderer's fixed-size icons
+and is clamped to the canvas. None of these positions may be used for commands,
+safety decisions, virtual-fence writes, or other physical control.

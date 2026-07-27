@@ -11,9 +11,13 @@ _WIDTH = 720
 _HEIGHT = 900
 _MARGIN = 48
 
-# The mower coordinates describe the navigation anchor, not the icon centre.
-_MOWER_ICON_OFFSET_X = 20
-_MOWER_ICON_OFFSET_Y = 68
+# The observed mower fields locate a navigation anchor, while these fixed-size
+# SVG icons need a visual pixel offset. This affects presentation only; marker
+# centres are clamped so the offset cannot push an icon outside the canvas.
+_MARKER_VISUAL_OFFSET_X = 20
+_MARKER_VISUAL_OFFSET_Y = 68
+_MARKER_HALF_WIDTH = 20
+_MARKER_HALF_HEIGHT = 28
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,11 +41,7 @@ def render_map_svg(
     include_cleaned_paths: bool = False,
 ) -> bytes:
     """Render a normalized map snapshot as an iOS-like SVG."""
-    pathways = tuple(
-        pathway
-        for pathway in snapshot.pathways
-        if any(not _point_in_polygon(point, snapshot.boundary) for point in pathway)
-    )
+    pathways = snapshot.pathways
     cleaned_paths = snapshot.cleaned_paths if include_cleaned_paths else ()
     mower_position = _rendered_mower_position(
         snapshot,
@@ -90,19 +90,24 @@ def render_map_svg(
         elements.append(f'<polyline class="pathway-center" points="{rendered}" />')
 
     if station_position is not None:
-        station_x, station_y = projection.point(station_position)
+        station_x, station_y = _marker_position(
+            station_position,
+            projection,
+            apply_visual_offset=True,
+        )
         elements.append(
             _render_charging_station(
-                station_x + _MOWER_ICON_OFFSET_X,
-                station_y + _MOWER_ICON_OFFSET_Y,
+                station_x,
+                station_y,
             )
         )
 
     if mower_position is not None:
-        mower_x, mower_y = projection.point(mower_position)
-        if not include_cleaned_paths:
-            mower_x += _MOWER_ICON_OFFSET_X
-            mower_y += _MOWER_ICON_OFFSET_Y
+        mower_x, mower_y = _marker_position(
+            mower_position,
+            projection,
+            apply_visual_offset=not include_cleaned_paths,
+        )
         elements.append(
             _render_mower(
                 mower_x,
@@ -154,6 +159,22 @@ def _render_points(
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in map(projection.point, points))
 
 
+def _marker_position(
+    position: Point,
+    projection: _Projection,
+    *,
+    apply_visual_offset: bool,
+) -> tuple[float, float]:
+    x, y = projection.point(position)
+    if apply_visual_offset:
+        x += _MARKER_VISUAL_OFFSET_X
+        y += _MARKER_VISUAL_OFFSET_Y
+    return (
+        min(max(x, _MARKER_HALF_WIDTH), _WIDTH - _MARKER_HALF_WIDTH),
+        min(max(y, _MARKER_HALF_HEIGHT), _HEIGHT - _MARKER_HALF_HEIGHT),
+    )
+
+
 def _render_mower(x: float, y: float, *, is_live: bool) -> str:
     scale = " scale(.75)" if is_live else ""
     lightning = (
@@ -195,22 +216,6 @@ def _rendered_mower_position(
                 return path[-1]
         return None
     return snapshot.mower_position
-
-
-def _point_in_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:
-    inside = False
-    previous = polygon[-1]
-    for current in polygon:
-        crosses_y = (current.y > point.y) != (previous.y > point.y)
-        if crosses_y:
-            crossing_x = (
-                ((previous.x - current.x) * (point.y - current.y))
-                / (previous.y - current.y)
-            ) + current.x
-            if point.x < crossing_x:
-                inside = not inside
-        previous = current
-    return inside
 
 
 def _visible_points(

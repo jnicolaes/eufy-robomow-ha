@@ -167,3 +167,23 @@ def test_parse_map_snapshot_rejects_coordinate_outside_sint32() -> None:
 
     with pytest.raises(MapDecodeError, match="sint32"):
         parse_map_snapshot(message(2, message(1, record)), b"", b"")
+
+
+def test_parse_map_snapshot_skips_point_message_without_coordinates() -> None:
+    boundary = b"".join(
+        (
+            message(1, point(10, 0)),
+            message(1, integer(3, 99)),
+            message(1, point(10, 10)),
+            message(1, point(0, 10)),
+        )
+    )
+    record = integer(16, 1) + message(10, message(3, boundary))
+
+    snapshot = parse_map_snapshot(message(2, message(1, record)), b"", b"")
+
+    assert snapshot.boundary == (
+        Point(10, 0),
+        Point(10, 10),
+        Point(0, 10),
+    )

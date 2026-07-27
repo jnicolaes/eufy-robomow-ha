@@ -139,6 +139,12 @@ class MapSourceStatus:
     last_error: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _MapFetch:
+    encoded: bytes | None
+    etag: str | None = None
+
+
 class MapSource:
     """Fetch a map bundle and retain the latest valid snapshot."""
 
@@ -149,17 +155,19 @@ class MapSource:
         settings: MapSourceSettings,
         device_id: str,
         cache_file: Path,
+        cache_root: Path | None = None,
     ) -> None:
         self._hass = hass
         self._settings = settings
         self._device_id = device_id
         self._cache_file = cache_file
+        self._cache_root = cache_root or cache_file.parent
         self._current: LoadedMap | None = None
         self._last_error: str | None = None
         self._last_attempt: float | None = None
         self._consecutive_failures = 0
         self._streaming = False
-        self._etag: str | None = None
+        self._etags: dict[bool, str] = {}
 
     @property
     def status(self) -> MapSourceStatus:
@@ -185,15 +193,19 @@ class MapSource:
         self._streaming = streaming
         if (
             not mode_changed
-            and self._current is not None
             and self._last_attempt is not None
             and now - self._last_attempt < self._next_refresh_delay(streaming)
         ):
-            return self._current
+            if self._current is not None:
+                return self._current
+            raise MapSourceError(
+                self._last_error or "Map source refresh is waiting to retry"
+            )
         self._last_attempt = now
 
         try:
-            encoded = await self._async_fetch(streaming=streaming)
+            fetched = await self._async_fetch(streaming=streaming)
+            encoded = fetched.encoded
             if encoded is None:
                 if self._current is None:
                     raise MapSourceError("Map source returned no initial snapshot")
@@ -206,13 +218,17 @@ class MapSource:
                 self._device_id,
             )
             _reject_future_snapshot(loaded)
+            _reject_older_snapshot(loaded, self._current)
             if self._current is None or loaded.snapshot_id != self._current.snapshot_id:
                 await self._hass.async_add_executor_job(
                     write_cached_bundle,
                     self._cache_file,
                     encoded,
+                    self._cache_root,
                 )
             self._current = loaded
+            if fetched.etag is not None:
+                self._etags[streaming] = fetched.etag
             self._last_error = None
             self._consecutive_failures = 0
             return loaded
@@ -254,7 +270,7 @@ class MapSource:
             return interval
         return max(interval, min(2**self._consecutive_failures, 60))
 
-    async def _async_fetch(self, *, streaming: bool) -> bytes | None:
+    async def _async_fetch(self, *, streaming: bool) -> _MapFetch:
         session = async_get_clientsession(self._hass)
         ssl: bool | aiohttp.Fingerprint = True
         if self._settings.certificate_fingerprint is not None:
@@ -265,8 +281,8 @@ class MapSource:
             "Accept": MAP_BUNDLE_CONTENT_TYPE,
             MAP_MODE_HEADER: MAP_MODE_STREAM if streaming else MAP_MODE_IDLE,
         }
-        if self._etag is not None:
-            headers["If-None-Match"] = self._etag
+        if etag := self._etags.get(streaming):
+            headers["If-None-Match"] = etag
         async with session.get(
             f"{self._settings.base_url}/v1/map",
             headers=headers,
@@ -274,7 +290,7 @@ class MapSource:
             timeout=_REQUEST_TIMEOUT,
         ) as response:
             if response.status == 304:
-                return None
+                return _MapFetch(None)
             if response.status == 401:
                 raise MapSourceError("Map source rejected authentication")
             if response.status == 503:
@@ -298,9 +314,15 @@ class MapSource:
             if len(encoded) > _MAX_BUNDLE_SIZE:
                 raise MapSourceError("Map source response exceeds 16 MiB")
             etag = response.headers.get("ETag")
-            if etag and len(etag) <= 256 and "\n" not in etag and "\r" not in etag:
-                self._etag = etag
-            return encoded
+            valid_etag = (
+                etag
+                if etag
+                and len(etag) <= 256
+                and "\n" not in etag
+                and "\r" not in etag
+                else None
+            )
+            return _MapFetch(encoded, valid_etag)
 
 
 def decode_map_bundle(data: bytes, expected_device_id: str) -> LoadedMap:
@@ -387,10 +409,25 @@ def read_cached_bundle(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def write_cached_bundle(path: Path, data: bytes) -> None:
+def write_cached_bundle(
+    path: Path,
+    data: bytes,
+    cache_root: Path | None = None,
+) -> None:
     """Atomically replace the single latest-good bundle."""
+    private_root = cache_root or path.parent
+    if private_root != path.parent and private_root not in path.parents:
+        raise MapSourceError("Map cache file is outside its private root")
+
+    private_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(path.parent, 0o700)
+    directory = path.parent
+    while True:
+        os.chmod(directory, 0o700)
+        if directory == private_root:
+            break
+        directory = directory.parent
+
     temporary = path.with_name(f".{path.name}-{uuid.uuid4().hex}")
     try:
         with temporary.open("xb") as stream:
@@ -458,3 +495,11 @@ def _safe_error_message(exc: BaseException) -> str:
 def _reject_future_snapshot(loaded: LoadedMap) -> None:
     if loaded.captured_at > datetime.now(tz=UTC) + timedelta(minutes=5):
         raise MapSourceError("Map source returned a future-dated snapshot")
+
+
+def _reject_older_snapshot(
+    loaded: LoadedMap,
+    current: LoadedMap | None,
+) -> None:
+    if current is not None and loaded.captured_at < current.captured_at:
+        raise MapSourceError("Map source returned an older snapshot")

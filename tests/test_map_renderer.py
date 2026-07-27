@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from custom_components.eufy_robomow.map import MapSnapshot, Point
 from custom_components.eufy_robomow.map_renderer import (
     MAP_CONTENT_TYPE,
@@ -55,7 +57,7 @@ def test_render_map_svg_is_deterministic_and_script_free() -> None:
     assert b'class="boundary"' in rendered
     assert b'class="base-area"' in rendered
     assert b'class="no-go-area"' in rendered
-    assert rendered.count(b'class="pathway"') == 1
+    assert rendered.count(b'class="pathway"') == 2
     assert b'class="mower-marker"' in rendered
 
 
@@ -74,3 +76,27 @@ def test_render_map_svg_can_show_current_cleaned_path() -> None:
     assert b'class="charging-station"' in rendered
     assert b"scale(.75)" in rendered
     assert b'class="mower-lightning"' not in rendered
+
+
+def test_render_map_svg_keeps_offset_markers_inside_canvas() -> None:
+    snapshot = MapSnapshot(
+        map_id=539,
+        boundary=(Point(0, 0), Point(100, 0), Point(100, 100), Point(0, 100)),
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=((Point(0, 0), Point(100, 100)),),
+        mower_position=Point(1000, 1000),
+        tracking_position=Point(0, 0),
+    )
+
+    rendered = render_map_svg(snapshot, include_cleaned_paths=True)
+    positions = re.findall(
+        rb'class="(?:charging-station|mower-marker)" '
+        rb'transform="translate\(([\d.]+) ([\d.]+)\)',
+        rendered,
+    )
+
+    assert len(positions) == 2
+    assert all(20 <= float(x) <= 700 for x, _ in positions)
+    assert all(28 <= float(y) <= 872 for _, y in positions)
