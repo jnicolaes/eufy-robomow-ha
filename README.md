@@ -35,6 +35,18 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 >
 > Some entities (generic raw DP sensors, map coverage) are **disabled by default** — enable them in HA if you want to explore unconfirmed data points.
 
+### Map preview
+
+<p align="center">
+  <img src="docs/map-preview.svg" alt="Synthetic Eufy E15 map preview showing the boundary, live mowing coverage, mower, charging station, pathway and no-go area" width="480">
+</p>
+
+The map image follows the live mowing session with two-second, change-aware
+updates. It shows the mapped boundary, charging area, external pathways, no-go
+areas, completed mowing lanes and the latest mower position. The preview above
+uses synthetic geometry; no private lawn map or device data is stored in this
+repository.
+
 ---
 
 ## Prerequisites
