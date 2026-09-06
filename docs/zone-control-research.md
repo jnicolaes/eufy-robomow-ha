@@ -168,6 +168,54 @@ multi-area targeting, map/area identity binding or the Spot mode. Raw status
 captures remain private on the HA host; no credentials or lawn geometry are
 included here.
 
+## Area-identity investigation after the app task
+
+The owned device's cloud inventory response contains no product/DP schema. The
+cached raw map does contain one previously unused record at map-record field
+10, subfield 4. Its subfield 3 polygon exactly matches the complete boundary in
+field 10, subfield 3. Integer metadata subfields 4 and 6 both equal 1. These are
+candidate metadata fields, not established area IDs: neither has yet been varied
+or matched to an outbound task request. Map-record field 23 also contains nested
+metadata with a one-byte zero payload; its meaning is unknown. Do not assume UI
+label 1 maps to either a value of 1 or a zero-based value of 0.
+
+A fresh cloud baseline at 17:47:03.210187 UTC still reported Zone mode and a docked
+mower. The next non-motion comparison is deselecting the sole existing area while
+remaining in Zone mode. This isolates area selection from the already observed
+mode changes if the app permits an empty selection and transmits it. Cached map
+geometry and raw DP snapshots remain on the private HA host.
+
+At 17:49:08.341467 UTC, after the owner confirmed deselecting area 1 while staying
+in Zone, DP154 and DP155 matched the selected baseline. Of 86 DPs, only DP107 and
+DP152 differed. DP152 retained its nested fields 3 and 4 and gained top-level
+integer field 5 = 1. DP107 changed from a one-byte opaque value to integer field
+4 = 2. HA reported docked. This is an observed difference after deselection, not
+proof that either field contains an area identifier; background status changes
+remain possible. Re-selecting area 1 is the next comparison to test reversibility.
+
+At 17:51:15.049781 UTC, after the owner confirmed reselecting area 1, all 86 DPs
+matched the deselected sample. DP107 and DP152 did not revert to the initial
+selected baseline. The selected–deselected–selected comparison therefore does
+not establish either changed field as an area selector. Further identical
+status-polling/click cycles have no demonstrated information gain. The next
+evidence path is an app-originated request or independently identified area
+schema; an incoming MQTT subscription alone does not prove request visibility.
+
+A bounded passive observer was subsequently attached to the existing helper's
+receive callback. It retained the original relay filtering, subscriptions and
+publish behavior. The sampled decrypted traffic contained 21 protocol-302 P2P
+signaling messages and no DP fields. No user-confirmed app selection was received
+during that observation window, so this does not establish whether an app command
+would be visible on the connection. Payloads outside the existing device-key
+decoder were not inspected; absence of a decoded message is not proof of absence
+of traffic. Repeating status polling is still insufficient for area identity.
+
+The temporary observer and startup override were removed, the original relay
+source checksum remained unchanged, and normal idle map requests were restored.
+The authenticated helper status returned HTTP 200, healthy, zero consecutive
+failures and a fresh success timestamp after cleanup. No mower actuation occurred
+in this passive investigation.
+
 Implementation requires a stable area identifier, its relationship to the active
 map generation, a validated command and device acceptance/error semantics. Its
 tests must cover stale map IDs, removed/unknown areas, unavailable telemetry and
