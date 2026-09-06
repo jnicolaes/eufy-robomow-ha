@@ -4,6 +4,10 @@ A Home Assistant custom integration for the **Eufy E15** robotic lawn mower. The
 
 Control and monitor your Eufy mower directly from Home Assistant over your local network, with cloud-synced settings pulled straight from your Eufy account — no extra tools or manual key extraction required.
 
+GitHub is the development source and issue tracker for this fork. Version 0.7.0
+adds a dedicated dashboard card, observed session history, confirmed commands
+and an optional Home Assistant planning package.
+
 ---
 
 ## Features
@@ -89,6 +93,43 @@ opt in to control.
 
 > **Alpha credential notice:** the current cloud client still stores the Eufy account password in the Home Assistant config entry so it can renew sessions. Restrict access to Home Assistant backups and `.storage`; replacing this with renewable session material is tracked as a separate hardening change.
 
+### Mower dashboard and session history
+
+1. Install the integration and restart Home Assistant.
+2. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.0` as a JavaScript module under
+   **Settings → Dashboards → Resources** (advanced mode may be needed).
+3. Create a dashboard, enable its sidebar entry, and use
+   [`examples/dashboard.yaml`](examples/dashboard.yaml). Replace entity IDs with
+   those from your installation. The card also works in an existing dashboard.
+
+The card supports map zoom/pan, battery and session telemetry, settings, and
+start/resume, pause and return commands. It shows pending, confirmed, failed and
+uncertain results. Start requires confirmation; unavailable or stale telemetry
+and observe-only mode disable controls. An inactive-task response to Return is
+not proof of physical arrival at the dock.
+
+Fifty observed session summaries are stored privately in Home Assistant; the
+card shows the latest twenty. Pauses and telemetry gaps remain visible, and a
+restart does not invent missing mowing time. Area remains in raw units until the
+scale is validated. Existing lifetime counters are not reconstructed as sessions.
+The optional map source described below is still required for map display.
+
+### Optional rain-aware planning
+
+[`examples/eufy_mower_planning.yaml`](examples/eufy_mower_planning.yaml) is an
+opt-in Home Assistant package. Replace every `example_*` source and mower entity
+with your own. It expects the documented Buienalarm precipitation-array shape
+and separate irrigation valve, active-session, planned-session and start-time
+entities. Missing or stale sources block automatic starts.
+
+The package offers weekday and time-window selection, minimum battery, dry hold
+and maximum session duration. It checks radar coverage for the whole planned
+session, irrigation conflicts, daylight and onboard rain/child protection. It
+allows at most one start attempt per day. Its watchdog handles only sessions it
+started, issuing one pause or return request without automatic retries/resume.
+Automatic mowing initially stays off; configure and supervise validation before
+enabling it. Eufy-app schedules run independently and must be considered separately.
+
 ### Optional read-only map
 
 E15 maps use a separate Tuya P2P media transport that is not available through
@@ -145,7 +186,7 @@ protocol tests.
 
 ## Known limitations
 
-- **Zone mowing** — the local Tuya protocol cannot distinguish zone 1 from zone 2 (both send an identical DP154 value; zone selection happens over cloud MQTT which is not locally accessible). Full-area mow only for now.
+- **Zone mowing** — the owned E15 app shows Entire, Zone, Box and Spot, but area identifiers and command transport have not been validated. No zone action is exposed; see [zone research](docs/zone-control-research.md).
 - **Map acquisition** — experimental and requires a separate compatible source because Tuya publishes the required P2P transport only through its Android media stack.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 

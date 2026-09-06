@@ -42,11 +42,11 @@ DP125_SECONDS_PER_UNIT = 6.6
 
 # DPS that should NOT be exposed as generic sensors (already have dedicated entities)
 EXCLUDED_DPS = {
-    "1",    # Task active      → used internally by lawn_mower entity
-    "2",    # Paused           → used internally by lawn_mower entity
-    "8",    # Battery          → dedicated Battery sensor
-    "26",   # Volume           → dedicated Number entity
-    "47",   # Child protection → dedicated Switch entity
+    "1",  # Task active      → used internally by lawn_mower entity
+    "2",  # Paused           → used internally by lawn_mower entity
+    "8",  # Battery          → dedicated Battery sensor
+    "26",  # Volume           → dedicated Number entity
+    "47",  # Child protection → dedicated Switch entity
     "101",  # Rain detection   → dedicated Switch entity
     "109",  # Signal strength  → dedicated Sensor entity
     "110",  # Cut height       → dedicated Number entity
@@ -65,11 +65,11 @@ EXCLUDED_DPS = {
 # Cloud setting keys that have dedicated entities — exclude from generic sensors
 # to avoid duplicating values that are already well-represented.
 CLOUD_ENTITY_KEYS = {
-    "cloud_path_mm",       # Path distance select (8/10/12 cm)
+    "cloud_path_mm",  # Path distance select (8/10/12 cm)
     "cloud_travel_speed",  # Travel speed select
-    "cloud_blade_speed",   # Blade speed select
-    "cloud_edge_mm",       # Edge distance number
-    "cloud_pad_direction", # Pad direction number
+    "cloud_blade_speed",  # Blade speed select
+    "cloud_edge_mm",  # Edge distance number
+    "cloud_pad_direction",  # Pad direction number
 }
 
 # Pre-seed set is now empty — all previously known DPs have dedicated entities.
@@ -147,6 +147,7 @@ SENSORS: tuple[EufySensorDescription, ...] = (
 
 # ── Shared protobuf helpers ────────────────────────────────────────────────────
 
+
 def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
     """Read a protobuf varint from *data* at *pos*. Returns (value, new_pos)."""
     result = shift = 0
@@ -182,11 +183,11 @@ def _proto_flat(data: bytes) -> dict[int, Any]:
                 fields[fn] = data[pos : pos + length]
                 pos += length
             elif wt == 1:
-                pos += 8   # fixed64 — skip
+                pos += 8  # fixed64 — skip
             elif wt == 5:
-                pos += 4   # fixed32 / float — skip
+                pos += 4  # fixed32 / float — skip
             else:
-                break      # unknown wire type — bail out
+                break  # unknown wire type — bail out
         except Exception:
             break
     return fields
@@ -219,9 +220,9 @@ def _decode_dp113(raw_blob: str | None) -> _Dp113Result:
         return None, None, None
 
     f = _proto_flat(data)
-    total   = f.get(2)   # zone planned area
-    covered = f.get(3)   # area covered this session
-    dist    = f.get(5)   # distance in metres
+    total = f.get(2)  # zone planned area
+    covered = f.get(3)  # area covered this session
+    dist = f.get(5)  # distance in metres
 
     # field2 must be a positive int for data to be meaningful
     if not isinstance(total, int) or total <= 0:
@@ -230,7 +231,7 @@ def _decode_dp113(raw_blob: str | None) -> _Dp113Result:
     return (
         total,
         covered if isinstance(covered, int) else None,
-        dist    if isinstance(dist,    int) else None,
+        dist if isinstance(dist, int) else None,
     )
 
 
@@ -266,6 +267,8 @@ async def async_setup_entry(
     entities.append(EufyMowingProgressSensor(coordinator, entry))
     entities.append(EufySessionDistanceSensor(coordinator, entry))
     entities.append(EufyCoverageSensor(coordinator, entry))
+    if coordinator.session_store:
+        entities.append(EufySessionHistorySensor(coordinator, entry, coordinator.session_store))
     async_add_entities(entities)
 
     # Track which DP IDs already have a generic sensor so we never duplicate.
@@ -328,7 +331,7 @@ def _decode_blob(value: Any) -> str:
 
             # Return hex representation for binary data
             return f"<blob ({len(decoded)} bytes)> {decoded.hex()}"
-        except (binascii.Error, ValueError):
+        except binascii.Error, ValueError:
             # Not base64, return as-is
             pass
 
@@ -515,3 +518,33 @@ class EufyGenericSensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
     def _handle_update(self) -> None:
         """Handle coordinator update."""
         self.async_write_ha_state()
+
+
+class EufySessionHistorySensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
+    """Expose a bounded view; the private store owns full session summaries."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Mowing Session"
+    _attr_icon = "mdi:history"
+    _unrecorded_attributes = frozenset({"current_session", "recent_sessions"})
+
+    def __init__(self, coordinator, entry, sessions) -> None:
+        super().__init__(coordinator)
+        self._sessions = sessions
+        self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_mowing_session"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])})
+
+    @property
+    def native_value(self) -> str:
+        current = self._sessions.history.current
+        return current["phase"] if current else "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        history = self._sessions.history
+        return {
+            "current_session": history.current,
+            "recent_sessions": history.recent[:20],
+            "stored_sessions": len(history.recent),
+            "area_unit": "raw",
+        }

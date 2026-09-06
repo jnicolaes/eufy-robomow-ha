@@ -8,4 +8,6 @@
 - E15 is the only model that may be claimed as supported until E18 hardware is physically validated.
 - HACS packaging and publication are deferred. Obsidian is out of scope for this project.
 - Run Ruff and pytest for every code change. Add focused regression coverage for confirmed protocol behavior.
+- GitHub is the canonical development source and tracker. Preserve the public map-source API when porting locally validated work; do not publish private deployment history or household entity identifiers.
+- Keep GitHub Actions checks for types, frontend tests, Hassfest, runtime dependency audit and secrets in addition to Ruff and pytest.
 - Do not deploy to the live mower or Home Assistant instance from CI.

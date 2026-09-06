@@ -1,0 +1,31 @@
+title: Grasmaaier
+views:
+  - title: Grasmaaier
+    path: overzicht
+    type: panel
+    cards:
+      - type: custom:eufy-mower-card
+        title: Grasmaaier
+        entity: lawn_mower.eufy_robomow_e15_mower
+        map: image.eufy_robomow_e15
+        session: sensor.eufy_robomow_e15_mowing_session
+        battery: sensor.eufy_robomow_e15_battery
+        progress: sensor.eufy_robomow_e15_mowing_progress
+        distance: sensor.eufy_robomow_e15_session_distance
+        area: sensor.eufy_robomow_e15_mowed_area
+        planner_reason: sensor.eufy_maaiplanning
+        settings:
+          - number.eufy_robomow_e15_cut_height
+          - select.eufy_robomow_e15_travel_speed
+          - select.eufy_robomow_e15_blade_speed
+          - select.eufy_robomow_e15_path_distance
+          - number.eufy_robomow_e15_pad_direction
+        planner_entities:
+          - sensor.eufy_maaiomstandigheden
+          - input_boolean.eufy_automatisch_maaien
+          - input_select.eufy_maaidagen
+          - input_datetime.eufy_maaivenster_start
+          - input_datetime.eufy_maaivenster_einde
+          - input_number.eufy_droogtijd_minuten
+          - input_number.eufy_maximale_sessieduur
+          - input_number.eufy_minimale_startbatterij

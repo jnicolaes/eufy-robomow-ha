@@ -600,6 +600,9 @@ class EufyCloudClient:
 
     def _tuya_acquire_session(self) -> None:
         """Authenticate with Tuya and store the session ID + regional base URL."""
+        if self._tuya_username is None or self._tuya_country is None:
+            raise TuyaSessionError("Eufy identity is unavailable for Tuya login")
+
         password = _determine_password(self._tuya_username)
 
         # Step 1: get an RSA public key + challenge token

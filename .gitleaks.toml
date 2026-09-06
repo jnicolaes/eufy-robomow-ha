@@ -1,0 +1,33 @@
+title = "Eufy source secret scan"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic local-key fixtures used only by tests"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^tests/test_options_flow\.py$''']
+regexes = [
+  '''^0123456789abcdef$''',
+]
+
+[[allowlists]]
+description = "Synthetic local-key fixtures used only by tests"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^tests/test_map_source\.py$''']
+regexes = [
+  '''^0123456789abcdef$''',
+]
+
+[[allowlists]]
+description = "Inherited vendor application constants; not user credentials"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^custom_components/eufy_robomow/cloud\.py$''']
+regexes = [
+  '''^GQCpr9dSp3uQpsOMgJ4xQ$''',
+  '''^cepev5pfnhua4dkqkdpmnrdxx378mpjr$''',
+  '''^s8x78u7xwymasd9kqa7a73pjhxqsedaj$''',
+]

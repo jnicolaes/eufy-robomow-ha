@@ -23,5 +23,56 @@ jobs:
         run: python -m pip install --requirement requirements-dev.txt
       - name: Ruff
         run: python -m ruff check .
+      - name: Types
+        run: python -m mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs custom_components/eufy_robomow
       - name: Tests
         run: python -m pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+      - run: node --experimental-default-type=module --test tests/frontend/card.test.mjs
+
+  hassfest:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/home-assistant/hassfest@sha256:5fc3c5d7df109d248a61acfb0a675b38b1e4dc3a202feb260a8e33696f9803e3
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Validate integration
+        run: |
+          cd /usr/src/homeassistant
+          python3 -m script.hassfest --action validate --integration-path "$GITHUB_WORKSPACE/custom_components/eufy_robomow"
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - run: python -m pip install 'pip-audit>=2.9,<3'
+      - name: Audit declared runtime dependencies
+        run: |
+          python -c 'import json; print("\n".join(json.load(open("custom_components/eufy_robomow/manifest.json"))["requirements"]))' > /tmp/runtime-requirements.txt
+          python -m pip_audit --requirement /tmp/runtime-requirements.txt
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Scan source for secrets
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSL "$base/$asset" -o "/tmp/$asset"
+          curl -fsSL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o /tmp/checksums.txt
+          (cd /tmp && grep "  $asset\$" checksums.txt | sha256sum --check --strict)
+          tar -xzf "/tmp/$asset" -C /tmp gitleaks
+          /tmp/gitleaks dir --redact --no-banner .

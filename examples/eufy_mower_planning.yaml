@@ -1,0 +1,320 @@
+# Example package: replace every example_* entity with your own source.
+# The sensor expects Buienalarm attributes.data: success, start, delta, precip.
+# Missing irrigation/radar entities intentionally prevent automatic mowing.
+# A new installation starts with automatic mowing off. Existing Eufy-app schedules
+# remain independent. No raw map or private account identifiers are stored here.
+input_boolean:
+  eufy_planning_ingesteld:
+    name: Eufy planning geïnitialiseerd
+    icon: mdi:check
+  eufy_automatisch_maaien:
+    name: Eufy automatisch maaien
+    icon: mdi:calendar-clock
+  eufy_planning_eigen_sessie:
+    name: Eufy door planning gestarte sessie
+    icon: mdi:robot-mower
+
+input_select:
+  eufy_maaidagen:
+    name: Eufy maaidagen
+    options: ["Ma / wo / vr", "Di / do / za", "Dagelijks", "Weekend"]
+    icon: mdi:calendar-week
+
+input_datetime:
+  eufy_maaivenster_start:
+    name: Eufy vroegste start
+    has_date: false
+    has_time: true
+  eufy_maaivenster_einde:
+    name: Eufy laatste start
+    has_date: false
+    has_time: true
+  eufy_laatste_natte_waarneming:
+    name: Eufy laatste regen of beregening
+    has_date: true
+    has_time: true
+  eufy_laatste_startpoging:
+    name: Eufy laatste automatische startpoging
+    has_date: true
+    has_time: true
+
+input_number:
+  eufy_droogtijd_minuten:
+    name: Eufy droogtijd na regen of beregening
+    min: 30
+    max: 240
+    step: 15
+    unit_of_measurement: min
+    mode: box
+  eufy_maximale_sessieduur:
+    name: Eufy maximale automatische sessieduur
+    min: 30
+    max: 120
+    step: 15
+    unit_of_measurement: min
+    mode: box
+  eufy_minimale_startbatterij:
+    name: Eufy minimale startbatterij
+    min: 40
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: box
+
+template:
+  - sensor:
+      - name: Eufy maaiomstandigheden
+        unique_id: eufy_maaiomstandigheden
+        icon: mdi:weather-partly-rainy
+        state: >-
+          {% set radar = state_attr('sensor.example_buienalarm_rain_data', 'data') %}
+          {% set t = as_timestamp(now()) %}
+          {% set duur = states('input_number.eufy_maximale_sessieduur') | float(90) * 60 %}
+          {% set start = radar.get('start', 0) | float(0) if radar is mapping else 0 %}
+          {% set stap = radar.get('delta', 0) | int(0) if radar is mapping else 0 %}
+          {% set regen = radar.get('precip', []) if radar is mapping else [] %}
+          {% set gepland = as_timestamp(states('input_datetime.example_irrigation_start'), none) %}
+          {% if not is_state('switch.example_irrigation_valve', 'off') or not is_state('input_boolean.example_irrigation_active', 'off') %}
+            Beregening actief of klepstatus onbekend
+          {% elif states('input_boolean.example_irrigation_planned') not in ['on', 'off'] %}
+            Beregeningsplanning onbekend
+          {% elif is_state('input_boolean.example_irrigation_planned', 'on') and (gepland is none or gepland < t + duur + 1800) %}
+            Beregening gepland binnen de maaisessie
+          {% elif radar is not mapping or not radar.get('success', false) or stap <= 0 or start > t + 300 or t - start > 1200 or regen is not sequence or regen | length < 2 %}
+            Regenverwachting ontbreekt of is verouderd
+          {% elif start + stap * (regen | length - 1) < t + duur %}
+            Regenverwachting dekt de hele maaisessie niet
+          {% else %}
+            {% set ns = namespace(nat=false, ongeldig=false) %}
+            {% for waarde in regen %}
+              {% set tijd = start + loop.index0 * stap %}
+              {% if tijd >= t - stap and tijd <= t + duur %}
+                {% if not is_number(waarde) or waarde | float(-1) < 0 %}
+                  {% set ns.ongeldig = true %}
+                {% elif waarde | float(0) > 0 %}
+                  {% set ns.nat = true %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.ongeldig %}Regenverwachting bevat ongeldige metingen
+            {% elif ns.nat %}Regen gemeld of verwacht
+            {% else %}Droog volgens regenradar{% endif %}
+          {% endif %}
+        attributes:
+          bron: sensor.example_buienalarm_rain_data
+          bijgewerkt: "{{ now().isoformat() }}"
+      - name: Eufy maaiplanning
+        unique_id: eufy_maaiplanning
+        icon: mdi:calendar-clock
+        state: >-
+          {% set t = as_timestamp(now()) %}
+          {% set dagen = states('input_select.eufy_maaidagen') %}
+          {% set dag = now().weekday() %}
+          {% set maaidag = dagen == 'Dagelijks' or (dagen == 'Ma / wo / vr' and dag in [0,2,4]) or (dagen == 'Di / do / za' and dag in [1,3,5]) or (dagen == 'Weekend' and dag in [5,6]) %}
+          {% set begin = states('input_datetime.eufy_maaivenster_start') %}
+          {% set einde = states('input_datetime.eufy_maaivenster_einde') %}
+          {% set nat = as_timestamp(states('input_datetime.eufy_laatste_natte_waarneming'), none) %}
+          {% set poging = as_timestamp(states('input_datetime.eufy_laatste_startpoging'), 0) %}
+          {% set vers = as_timestamp(state_attr('lawn_mower.eufy_robomow_e15_mower', 'telemetry_updated_at'), 0) %}
+          {% if not is_state('input_boolean.eufy_automatisch_maaien', 'on') %}
+            Automatisch maaien staat uit
+          {% elif not is_state('input_boolean.eufy_planning_ingesteld', 'on') %}Planning wordt geïnitialiseerd
+          {% elif not maaidag %}Vandaag is geen ingestelde maaidag
+          {% elif begin in ['unknown','unavailable'] or einde in ['unknown','unavailable'] or begin >= einde %}Ongeldig maaivenster
+          {% elif now().strftime('%H:%M:%S') < begin %}Wacht tot {{ begin[:5] }}
+          {% elif now().strftime('%H:%M:%S') >= einde %}Maaivenster voor vandaag gesloten
+          {% elif poging | timestamp_custom('%Y-%m-%d') == now().strftime('%Y-%m-%d') %}Vandaag al een startpoging gedaan
+          {% elif not is_state('sun.sun', 'above_horizon') or as_timestamp(state_attr('sun.sun','next_setting'), 0) - t < states('input_number.eufy_maximale_sessieduur') | float(90) * 60 + 1800 %}Onvoldoende daglicht voor de maaisessie
+          {% elif t - vers > 45 or states('lawn_mower.eufy_robomow_e15_mower') in ['unknown','unavailable'] %}Maaierstatus ontbreekt of is verouderd
+          {% elif state_attr('lawn_mower.eufy_robomow_e15_mower', 'operating_mode') != 'control' %}Maaier staat op alleen observeren
+          {% elif not is_state('lawn_mower.eufy_robomow_e15_mower', 'docked') %}Maaier heeft al een actieve taak
+          {% elif states('sensor.eufy_robomow_e15_battery') | float(-1) < states('input_number.eufy_minimale_startbatterij') | float(80) %}Batterij onvoldoende geladen
+          {% elif not is_state('switch.eufy_robomow_e15_stop_on_rain_detection', 'on') or not is_state('switch.eufy_robomow_e15_child_protection', 'on') %}Regenstop of kinderbeveiliging niet bevestigd
+          {% elif not is_state('sensor.eufy_maaiomstandigheden', 'Droog volgens regenradar') %}{{ states('sensor.eufy_maaiomstandigheden') }}
+          {% elif nat is none or t - nat < states('input_number.eufy_droogtijd_minuten') | float(60) * 60 %}Wacht op droogtijd na regen, beregening of herstart
+          {% else %}Klaar om te maaien{% endif %}
+        attributes:
+          maaidagen: "{{ states('input_select.eufy_maaidagen') }}"
+          vroegste_start: "{{ states('input_datetime.eufy_maaivenster_start') }}"
+          laatste_start: "{{ states('input_datetime.eufy_maaivenster_einde') }}"
+          omstandigheden: "{{ states('sensor.eufy_maaiomstandigheden') }}"
+          eigen_sessie: "{{ is_state('input_boolean.eufy_planning_eigen_sessie', 'on') }}"
+
+script:
+  eufy_gepland_maaien:
+    alias: Eufy - geplande maaibeurt uitvoeren
+    mode: single
+    sequence:
+      - condition: state
+        entity_id: input_boolean.eufy_automatisch_maaien
+        state: "on"
+      - condition: state
+        entity_id: sensor.eufy_maaiplanning
+        state: Klaar om te maaien
+      # Record before sending: a timeout must never produce repeated starts.
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eufy_laatste_startpoging
+        data:
+          timestamp: "{{ as_timestamp(now()) }}"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.eufy_planning_eigen_sessie
+      - action: lawn_mower.start_mowing
+        target:
+          entity_id: lawn_mower.eufy_robomow_e15_mower
+
+automation:
+  - id: eufy_planning_initialiseren
+    alias: Eufy - eenmalige begininstellingen
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: state
+        entity_id: input_boolean.eufy_planning_ingesteld
+        state: "off"
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eufy_maaivenster_start
+        data:
+          time: "10:00:00"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eufy_maaivenster_einde
+        data:
+          time: "15:00:00"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.eufy_droogtijd_minuten
+        data:
+          value: 60
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.eufy_maximale_sessieduur
+        data:
+          value: 90
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.eufy_minimale_startbatterij
+        data:
+          value: 80
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.eufy_planning_ingesteld
+
+  - id: eufy_planning_droogtijd
+    alias: Eufy - droogtijd na regen en beregening
+    mode: restart
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "/5"
+      - trigger: state
+        entity_id:
+          - switch.example_irrigation_valve
+          - input_boolean.example_irrigation_active
+          - sensor.eufy_maaiomstandigheden
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.platform == 'homeassistant'
+             or not is_state('sensor.eufy_maaiomstandigheden', 'Droog volgens regenradar')
+             or not is_state('switch.example_irrigation_valve', 'off')
+             or not is_state('input_boolean.example_irrigation_active', 'off') }}
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.eufy_laatste_natte_waarneming
+        data:
+          timestamp: "{{ as_timestamp(now()) }}"
+
+  - id: eufy_planning_start
+    alias: Eufy - starten binnen het droge maaivenster
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: state
+        entity_id: sensor.eufy_maaiplanning
+        state: Klaar om te maaien
+    actions:
+      - action: script.eufy_gepland_maaien
+
+  - id: eufy_planning_bewaken
+    alias: Eufy - automatische maaibeurt bewaken
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/1"
+      - trigger: state
+        entity_id: switch.example_irrigation_valve
+        to: "on"
+      - trigger: state
+        entity_id: input_boolean.example_irrigation_active
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.eufy_planning_eigen_sessie
+        state: "on"
+      - condition: template
+        value_template: >-
+          {{ states('lawn_mower.eufy_robomow_e15_mower') in ['mowing','paused'] }}
+    actions:
+      - choose:
+          - conditions: >-
+              {{ as_timestamp(now()) - as_timestamp(states('input_datetime.eufy_laatste_startpoging'), 0)
+                 >= states('input_number.eufy_maximale_sessieduur') | float(90) * 60 }}
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.eufy_planning_eigen_sessie
+              - action: lawn_mower.dock
+                continue_on_error: true
+                target:
+                  entity_id: lawn_mower.eufy_robomow_e15_mower
+              - action: persistent_notification.create
+                data:
+                  notification_id: eufy_maaisessie_duur
+                  title: Eufy maximale sessieduur bereikt
+                  message: >-
+                    De terugkeer is eenmaal aangevraagd. Controleer de opdrachtbevestiging
+                    en de aankomst bij het laadstation; er volgt geen automatische herhaling.
+          - conditions: >-
+              {{ is_state('lawn_mower.eufy_robomow_e15_mower', 'mowing')
+                 and (not is_state('switch.example_irrigation_valve', 'off')
+                   or not is_state('input_boolean.example_irrigation_active', 'off')
+                   or not is_state('sensor.eufy_maaiomstandigheden', 'Droog volgens regenradar')) }}
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.eufy_planning_eigen_sessie
+              - action: lawn_mower.pause
+                continue_on_error: true
+                target:
+                  entity_id: lawn_mower.eufy_robomow_e15_mower
+              - action: persistent_notification.create
+                data:
+                  notification_id: eufy_maaisessie_onderbroken
+                  title: Eufy maaibeurt onderbroken
+                  message: >-
+                    Pauzeren is eenmaal aangevraagd: {{ states('sensor.eufy_maaiomstandigheden') }}.
+                    Controleer of de maaier is gestopt. Hervat pas na controle van het gazon.
+                    Er volgt geen automatische hervatting of herhaling.
+
+  - id: eufy_planning_sessie_afgelopen
+    alias: Eufy - automatische sessie afsluiten
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: lawn_mower.eufy_robomow_e15_mower
+        to: docked
+        for: "00:02:00"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.eufy_planning_eigen_sessie

@@ -5,7 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import timedelta
+from threading import Lock
+from homeassistant.util import dt as dt_util
+
+from .commands import MowerCommand
+from .sessions import SessionStore
+from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
+from datetime import datetime, timedelta
 
 import tinytuya
 
@@ -66,6 +72,12 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.cloud_client = cloud_client
         self.operating_mode = operating_mode
 
+        self._device_lock = Lock()
+        self.local_dps: dict = {}
+        self.local_generation = 0
+        self.last_local_update: datetime | None = None
+        self.command: MowerCommand | None = None
+        self.session_store: SessionStore | None = None
         self._device = self._make_device()
         # Use float('-inf') so the first poll always fetches cloud DPS
         self._cloud_last_fetch: float = float("-inf")
@@ -116,6 +128,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         d.set_socketPersistent(False)
         return d
 
+    def _device_call(self, method: str, *args):
+        """Serialize worker calls even if an awaiting task is cancelled."""
+        with self._device_lock:
+            return getattr(self._device, method)(*args)
+
     # ── polling ───────────────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict:
@@ -135,8 +152,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
              register generic sensors immediately.
         """
         # ── 1. Local DPS (every POLL_INTERVAL seconds) ────────────────────────
+        sample_started = time.monotonic()
         try:
-            result = await self.hass.async_add_executor_job(self._device.status)
+            result = await self.hass.async_add_executor_job(self._device_call, "status")
         except Exception as exc:  # noqa: BLE001
             self._consecutive_errors += 1
             if self._consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
@@ -147,6 +165,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 self._device = self._make_device()
                 self._consecutive_errors = 0
             raise UpdateFailed(f"Tuya connection error: {exc}") from exc
+
+        if not isinstance(result, dict) or not isinstance(result.get("dps"), dict):
+            raise UpdateFailed("No valid local mower telemetry received")
 
         if "Error" in result:
             err = result["Error"]
@@ -164,6 +185,14 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self._consecutive_errors = 0
         dps: dict = result.get("dps", {})
         local_dp_keys: set[str] = set(dps.keys())
+        command_pending = self.command and self.command.state in ("sending", "pending")
+        self.local_dps = dict(dps)
+        self.local_generation += 1
+        self.last_local_update = dt_util.utcnow()
+        if self.command and sample_started > self.command.sent_monotonic:
+            self.command.observe(self.local_generation, self.local_dps)
+        if self.session_store:
+            self.session_store.observe(self.local_dps, self.last_local_update)
 
         _LOGGER.debug("Local DPS update received (%d keys)", len(dps))
 
@@ -176,7 +205,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         #      login is not retried every 10 s (which would hammer the Eufy API and
         #      interfere with other integrations sharing the same account).
         now = time.monotonic()
-        if self.cloud_client is not None:
+        if command_pending:
+            self._carry_forward_cloud_data(dps, local_dp_keys)
+        elif self.cloud_client is not None:
             _sun = self.hass.states.get("sun.sun")
             _sun_below_horizon = _sun is not None and _sun.state == "below_horizon"
 
@@ -185,15 +216,13 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 self._carry_forward_cloud_data(dps, local_dp_keys)
             else:
                 backoff = min(
-                    CLOUD_POLL_INTERVAL * (2 ** self._cloud_consecutive_failures),
+                    CLOUD_POLL_INTERVAL * (2**self._cloud_consecutive_failures),
                     _CLOUD_MAX_BACKOFF,
                 )
                 if now - self._cloud_last_fetch >= backoff:
                     try:
-                        raw_cloud_dps, cloud_settings = (
-                            await self.hass.async_add_executor_job(
-                                self.cloud_client.get_all_dps
-                            )
+                        raw_cloud_dps, cloud_settings = await self.hass.async_add_executor_job(
+                            self.cloud_client.get_all_dps
                         )
                         # Merge: add every cloud DP that is NOT already in local dps.
                         # Local values take precedence (more real-time).
@@ -218,7 +247,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                     except Exception as exc:  # noqa: BLE001
                         self._cloud_consecutive_failures += 1
                         next_retry = min(
-                            CLOUD_POLL_INTERVAL * (2 ** self._cloud_consecutive_failures),
+                            CLOUD_POLL_INTERVAL * (2**self._cloud_consecutive_failures),
                             _CLOUD_MAX_BACKOFF,
                         )
                         _LOGGER.warning(
@@ -256,9 +285,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
         return dps
 
-    def _carry_forward_cloud_data(
-        self, dps: dict, local_dp_keys: set[str]
-    ) -> None:
+    def _carry_forward_cloud_data(self, dps: dict, local_dp_keys: set[str]) -> None:
         """Copy all non-local keys from the previous coordinator.data into dps.
 
         This keeps cloud-only DP sensors from going unavailable between cloud polls.
@@ -272,18 +299,70 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     # ── commands ──────────────────────────────────────────────────────────────
 
+    async def async_send_mower_command(self, action: str, timeout: float = 35) -> None:
+        """Send once, then await fresh device telemetry with a bounded timeout."""
+        self._require_control_enabled()
+        if action not in ("start", "resume", "pause", "dock"):
+            raise HomeAssistantError("Unsupported mower command")
+        if self.command and self.command.state in ("sending", "pending"):
+            if action in ("start", "resume"):
+                raise HomeAssistantError("A mower command is already pending")
+            self.command.finish("superseded")
+        operation = MowerCommand(action, self.local_generation)
+        self.command = operation
+        self.async_update_listeners()
+        dp, value = {
+            "start": CMD_START,
+            "resume": CMD_RESUME,
+            "pause": CMD_PAUSE,
+            "dock": CMD_DOCK,
+        }[action]
+        try:
+            result = await self.hass.async_add_executor_job(
+                self._device_call, "set_value", int(dp), value
+            )
+            if operation.state == "superseded":
+                raise HomeAssistantError("Command superseded by a later safety command")
+            if isinstance(result, dict) and "Error" in result:
+                operation.finish("rejected")
+                raise HomeAssistantError("The mower rejected the command")
+            # Ignore every poll that began before the write finished.
+            operation.after_generation = self.local_generation
+            operation.sent_monotonic = time.monotonic()
+            operation.state = "pending"
+            self.async_update_listeners()
+            async with asyncio.timeout(timeout):
+                await self.async_request_refresh()
+                await operation.event.wait()
+            if operation.state == "superseded":
+                raise HomeAssistantError("Command superseded by a later safety command")
+        except TimeoutError as exc:
+            operation.finish("timeout")
+            raise HomeAssistantError(
+                "Command sent, but the mower did not confirm its state within 35 seconds. "
+                "It may still execute; check the mower before retrying."
+            ) from exc
+        except asyncio.CancelledError:
+            operation.finish("interrupted")
+            raise
+        except HomeAssistantError:
+            raise
+        except Exception as exc:
+            operation.finish("failed")
+            raise HomeAssistantError("Could not send the mower command") from exc
+        finally:
+            self.async_update_listeners()
+
     async def async_send_command(self, dp: str, value) -> None:
         """Write a single DPS value or raise a visible Home Assistant error."""
         self._require_control_enabled()
         _LOGGER.debug("Sending command DP %s = %s", dp, value)
         try:
             result = await self.hass.async_add_executor_job(
-                self._device.set_value, int(dp), value
+                self._device_call, "set_value", int(dp), value
             )
             if isinstance(result, dict) and "Error" in result:
-                raise HomeAssistantError(
-                    f"Mower rejected command DP {dp}: {result['Error']}"
-                )
+                raise HomeAssistantError(f"Mower rejected command DP {dp}: {result['Error']}")
             _LOGGER.debug("Command result: %s", result)
             # Immediately refresh state
             await self.async_request_refresh()
