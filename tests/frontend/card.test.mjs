@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 globalThis.HTMLElement = class {};
 globalThis.customElements = {get:() => true};
 globalThis.window = {};
-const {controls, mapHealth, escapeHTML} = await import('../../custom_components/eufy_robomow/frontend/eufy-mower-card.js');
+const {controls, mapHealth, escapeHTML, cardView} = await import('../../custom_components/eufy_robomow/frontend/eufy-mower-card.js');
 const now = Date.parse('2026-09-06T12:00:00Z');
 const mower = (state, options = {}) => ({state, attributes:{operating_mode:'control', supported_features:7, telemetry_updated_at:new Date(now).toISOString(), ...options}});
 test('observe-only and stale status disable physical controls', () => {
@@ -26,4 +26,10 @@ test('old image is visibly cached even when image entity is available', () => {
 });
 test('entity values cannot inject markup', () => {
   assert.equal(escapeHTML('<img onerror="x">'), '&lt;img onerror=&quot;x&quot;&gt;');
+});
+test('existing cards retain their combined view and invalid sections are rejected', () => {
+  assert.equal(cardView(), 'all');
+  for (const view of ['overview', 'history', 'planning', 'settings']) assert.equal(cardView(view), view);
+  assert.throws(() => cardView('zone-control'), /paneelweergave/);
+  assert.throws(() => cardView(null), /paneelweergave/);
 });

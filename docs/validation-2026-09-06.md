@@ -46,3 +46,28 @@ Ruff and mypy; the four frontend tests had already passed for the unchanged card
 Automatic mowing remains off. A naturally timed automatic session and zone/box/
 spot commands remain unvalidated. This test does not claim new zone support or
 complete unattended-operation validation.
+
+## Viewer-style dashboard revision
+
+Frontend 0.7.1 replaces the separate green visual theme with Home Assistant theme
+colors, simple cards and four native dashboard tabs: Maaier, Geschiedenis,
+Planning and Instellingen. The overview places the map beside the status/control
+card on desktop and stacks them on mobile. Controls precede the detailed metrics;
+settings use short Dutch display names without renaming entities. Existing cards
+without a `view` option retain their combined layout. The command service calls,
+confirmation prompt, freshness checks and read-only restrictions are unchanged.
+
+The live dashboard configuration and previous frontend were backed up before
+deployment. The configuration was saved and read back through Home Assistant's
+WebSocket API; the resource points to frontend 0.7.1. A core configuration check
+passed. No Core restart or physical test was needed for this presentation change.
+
+Validation passed 86 Python tests, Ruff and five frontend unit tests. An isolated
+browser checked all four sections plus the backward-compatible combined view,
+390-pixel overflow, canceled Start sending zero service calls and the unavailable
+settings state. In the actual HA browser, all four tabs rendered, all three saved
+sessions remained visible, the original planning values remained with automatic
+mowing off, and the settings still displayed their existing values. Desktop and
+390-pixel layouts were inspected; the temporary viewport override was reset.
+The deployed frontend checksum matches the final source. No mower or planning
+setting was changed by the browser checks.

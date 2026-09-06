@@ -96,11 +96,17 @@ opt in to control.
 ### Mower dashboard and session history
 
 1. Install the integration and restart Home Assistant.
-2. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.0` as a JavaScript module under
+2. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.1` as a JavaScript module under
    **Settings → Dashboards → Resources** (advanced mode may be needed).
 3. Create a dashboard, enable its sidebar entry, and use
    [`examples/dashboard.yaml`](examples/dashboard.yaml). Replace entity IDs with
-   those from your installation. The card also works in an existing dashboard.
+   those from your installation. The example uses four native Home Assistant tabs:
+   mower, history, planning and settings. Cards follow the active HA theme, like
+   the Eufy Viewer dashboard. The card also works in an existing dashboard.
+
+Set `view` to `overview`, `history`, `planning` or `settings` to show one section.
+Omitting it keeps the combined view for existing cards. Frontend version 0.7.1
+changes presentation only; it does not add zone commands or enable planning.
 
 The card supports map zoom/pan, battery and session telemetry, settings, and
 start/resume, pause and return commands. It shows pending, confirmed, failed and
