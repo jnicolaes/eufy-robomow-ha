@@ -83,6 +83,91 @@ existing area. Use host-private captures and publish only redacted structure.
 Local activity flags alone cannot establish which area was selected. A usable
 mapping needs both the app-selected area and matching device/task evidence.
 
+## Confirmed selection-only comparison
+
+On 2026-09-06 the owner confirmed selecting Entire without Start, followed by
+Zone and the visible area labelled 1, again without Start. Read-only cloud
+samples were acquired at 17:24:28.976761 UTC and 17:25:24.836711 UTC respectively.
+Both contained 86 DPs; HA reported the mower docked at each sample. Raw snapshots
+remain mode 0600 in the Core container's temporary directory, outside this repo.
+
+Exactly DP113, DP154 and DP155 differed, with no added or removed DP keys:
+
+- DP154 changed from a one-byte null sentinel to protobuf field 3, wire type 0,
+  integer 1. This is evidence of a selection-associated change. It does not yet
+  distinguish a Zone mode enum from an area identifier or establish a command.
+- DP155 retained the same five decoded settings. Its top-level field 7 (integer
+  80 in Entire) was absent in the Zone sample; the remaining parsed structure
+  matched. Do not interpret the omitted redundant path-distance field as an
+  area selector.
+- DP113 changed from fields 1 through 5 to field 1 only. This may reflect session
+  telemetry being cleared, but two snapshots do not establish its cause.
+
+At 17:27:45.553398 UTC, after the owner confirmed returning to Entire without
+Start, a third sample matched the original Entire sample exactly across all 86
+DPs. DP154 returned to the null sentinel and DP155 also returned to its original
+representation. HA again reported docked. This Entire–Zone 1–Entire comparison
+establishes a reversible association with the app selection; it still does not
+distinguish a mode enum from a selected-area identifier.
+
+At 17:29:26.936874 UTC, after the owner confirmed selecting Box without drawing
+a box or pressing Start, DP154 contained field 3, wire type 0, integer 2. Only
+DP113 and DP154 differed from the original Entire sample; all 86 DP keys remained
+present and DP155 matched Entire exactly. HA reported docked. The association
+Entire=null, Zone=1, Box=2 supports a mowing-mode interpretation of field 3,
+rather than treating its Zone value as the visible area's identifier. No box
+geometry was selected or captured in this test.
+
+The subsequent Spot selection attempt was rejected by the app with the owner's
+reported message, "spot is only available when the robot is outside the base
+station". A read-only sample at 17:30:46.196447 UTC matched the Box sample across
+all 86 DPs, including DP154 field 3 = 2; HA still reported docked. This proves no
+observed state change for the rejected attempt, not a Spot enum value. Do not
+assign Spot=3 by extrapolation or bypass the app's station restriction.
+
+Further area comparisons and supervised task acceptance are still required
+before adding a zone write. Confirm the number of existing selectable zones
+before choosing that comparison. No integration command or setting write was
+issued for these samples.
+
+The owner subsequently confirmed that only one area exists, labelled 1, and
+returned the app to Entire. A comparison between two distinct existing areas is
+therefore unavailable on this map. Do not create another area for testing or
+claim multi-area targeting from a single-area start. The next feasible evidence
+is observing a short app-originated Zone 1 task, with the existing HA return/pause
+path bounding its duration; this can establish mode/task association but may
+still leave the area identifier and command transport unresolved.
+
+## Supervised app-originated Zone 1 task
+
+The owner explicitly approved the short zone test with automatic HA return and
+pause as its recovery fallback. The first observer exited before arming because
+the app was already on Zone instead of Entire. The next observer accepted the
+observed Zone starting state and armed at 17:36:17.061131 UTC after checking idle
+state, fresh local telemetry, manual control mode, automatic planning off,
+irrigation off, daylight, sufficient battery and enabled rain/child protection.
+
+The owner pressed Start in the Eufy app with Zone 1 selected. HA reported mowing
+at 17:36:59.494308 UTC from fresh local telemetry dated 17:36:58.982397 UTC. A cloud
+sample at 17:36:59.541848 UTC retained DP154 field 3 = 1. Compared with the Zone
+selection-only sample, exactly DP1, DP103, DP107, DP113, DP143 and DP152 changed.
+DP1 became true; DP152 gained top-level integer field 1 = 1 while its two nested
+messages remained unchanged. These task-associated changes do not establish an
+area identifier. The observer read status; it did not capture the app's outbound
+request or establish which other fields the app sent.
+
+Twenty seconds after detecting activity, the observer requested the existing HA
+dock action. Its HTTP 200 response and fresh task-inactive confirmation were
+recorded at 17:37:30.996201 UTC. No pause fallback was needed, and the observer
+exited successfully. The owner separately confirmed physical departure and
+arrival back at the station. Task inactive alone is not evidence of arrival.
+
+This validates an app-originated task in the observed Zone mode on the owner's
+single-area map and the HA return path. It does not yet validate an HA zone write,
+multi-area targeting, map/area identity binding or the Spot mode. Raw status
+captures remain private on the HA host; no credentials or lawn geometry are
+included here.
+
 Implementation requires a stable area identifier, its relationship to the active
 map generation, a validated command and device acceptance/error semantics. Its
 tests must cover stale map IDs, removed/unknown areas, unavailable telemetry and
