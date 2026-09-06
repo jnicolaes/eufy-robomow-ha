@@ -78,6 +78,8 @@ class EufyRobomowMapImage(ImageEntity):
     """Expose the latest validated E15 map as an SVG image."""
 
     _attr_has_entity_name = True
+    # ImageEntity defaults to no polling; our source needs the platform timer.
+    _attr_should_poll = True
     _attr_translation_key = "map"
     _attr_icon = "mdi:map"
     _attr_content_type = MAP_CONTENT_TYPE
