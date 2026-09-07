@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="900" viewBox="0 0 720 900" role="img">
+  <title>Synthetic Eufy E15 map preview</title>
+  <defs>
+    <clipPath id="mowing-boundary-clip"><polygon points="149.88,147.55 391.84,147.55 404.57,230.33 601.96,243.06 672.00,319.47 627.43,408.61 652.90,516.86 570.12,593.27 506.45,586.90 474.61,733.35 334.53,733.35 321.80,580.53 188.08,561.43 149.88,472.29 175.35,357.67" /></clipPath>
+  </defs>
+  <rect class="background" width="720" height="900" />
+  <style>
+    .background { fill: #020505; }
+    .boundary { fill: #153f16; stroke: #49a6ff; stroke-width: 5; stroke-linejoin: round; }
+    .base-area { fill: #347f91; fill-opacity: .9; stroke: #55aaff; stroke-width: 4; stroke-dasharray: 12 8; stroke-linejoin: round; }
+    .no-go-area { fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }
+    .pathway { fill: none; stroke: #ffbd00; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+    .pathway-center { fill: none; stroke: #fff7cf; stroke-width: 1.5; stroke-dasharray: 8 8; stroke-linecap: round; }
+    .cleaned-area { opacity: .58; }
+    .cleaned-path { fill: none; stroke: #82967e; stroke-width: 54; stroke-linecap: round; stroke-linejoin: round; }
+    .mower-shadow { fill: #000; opacity: .6; }
+    .mower-wheel { fill: #25292d; stroke: #747b80; stroke-width: 1; }
+    .mower-body { fill: #8e9498; stroke: #eceff1; stroke-width: 1.5; }
+    .mower-panel { fill: #d1d4d6; stroke: #61676b; stroke-width: 1; }
+    .mower-accent { fill: #e34c56; }
+    .station-shadow { fill: #000; opacity: .55; }
+    .station-body { fill: #353a3f; stroke: #5c646a; stroke-width: 1.5; }
+    .station-top { fill: #484f55; }
+    .station-lightning { fill: #f4f7f8; }
+  </style>
+  <g>
+    <polygon class="boundary" points="149.88,147.55 391.84,147.55 404.57,230.33 601.96,243.06 672.00,319.47 627.43,408.61 652.90,516.86 570.12,593.27 506.45,586.90 474.61,733.35 334.53,733.35 321.80,580.53 188.08,561.43 149.88,472.29 175.35,357.67" />
+    <g class="cleaned-area" clip-path="url(#mowing-boundary-clip)">
+      <polyline class="cleaned-path" points="219.92,204.86 219.92,523.22" />
+      <polyline class="cleaned-path" points="270.86,523.22 270.86,204.86" />
+      <polyline class="cleaned-path" points="321.80,204.86 321.80,523.22" />
+      <polyline class="cleaned-path" points="372.73,523.22 372.73,262.16" />
+    </g>
+    <polygon class="base-area" points="302.69,707.88 423.67,707.88 423.67,752.45 302.69,752.45" />
+    <polygon class="no-go-area" points="506.45,300.37 551.02,294.00 570.12,338.57 525.55,360.86 493.71,332.20" />
+    <polyline class="pathway" points="48.00,453.18 168.98,453.18" />
+    <polyline class="pathway-center" points="48.00,453.18 168.98,453.18" />
+    <g class="charging-station" transform="translate(68.00 521.18)">
+      <ellipse class="station-shadow" cx="0" cy="4" rx="15" ry="24" />
+      <path class="station-body" d="M -11 -19 Q 0 -22 11 -19 L 10 19 Q 0 23 -10 19 Z" />
+      <path class="station-top" d="M -8 -15 Q 0 -18 8 -15 L 7 -8 Q 0 -11 -7 -8 Z" />
+      <path class="station-lightning" d="M 2 -3 L -5 7 L 0 7 L -3 15 L 7 4 L 2 4 Z" />
+    </g>
+    <g class="mower-marker" transform="translate(372.73 376.78) scale(.75)">
+      <ellipse class="mower-shadow" cx="0" cy="3" rx="17" ry="25" />
+      <rect class="mower-wheel" x="-17" y="-14" width="5" height="29" rx="2" />
+      <rect class="mower-wheel" x="12" y="-14" width="5" height="29" rx="2" />
+      <path class="mower-body" d="M -11 -20 Q 0 -25 11 -20 L 13 15 Q 0 23 -13 15 Z" />
+      <rect class="mower-panel" x="-7" y="-14" width="14" height="22" rx="4" />
+      <rect class="mower-accent" x="-2" y="-19" width="4" height="8" rx="2" />
+    </g>
+  </g>
+</svg>

@@ -1,4 +1,10 @@
 # Python
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
 __pycache__/
 *.pyc
 *.pyo
@@ -24,3 +30,12 @@ AGENT_CONTEXT.md
 
 # The key-grabber tool lives in its own repo
 eufy-clean-local-key-grabber/
+
+# Private captures and credentials
+captures/
+*.pcap
+*.pcapng
+.env
+.env.*
+secrets.yaml
+*local_key*

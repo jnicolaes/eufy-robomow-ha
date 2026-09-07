@@ -1,4 +1,5 @@
 """Lawn mower entity for Eufy Robomow."""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,6 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,16 +18,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     CONF_DEVICE_ID,
-    DP_TASK_ACTIVE,
     DP_PAUSED,
     DP_PROGRESS,
-    CMD_START,
-    CMD_PAUSE,
-    CMD_RESUME,
-    CMD_DOCK,
     RETURNING_THRESHOLD,
 )
 from .coordinator import EufyMowerCoordinator
+from .telemetry import task_active
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +43,7 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     _attr_has_entity_name = True
     _attr_translation_key = "lawn_mower"
     _attr_icon = "mdi:robot-mower"
-    _attr_supported_features = (
+    _CONTROL_FEATURES = (
         LawnMowerEntityFeature.START_MOWING
         | LawnMowerEntityFeature.PAUSE
         | LawnMowerEntityFeature.DOCK
@@ -68,14 +64,23 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             model="E15",
         )
 
+    @property
+    def supported_features(self) -> LawnMowerEntityFeature:
+        """Expose controls only after the user explicitly opts in."""
+        if not self.coordinator.control_enabled:
+            return LawnMowerEntityFeature(0)
+        return self._CONTROL_FEATURES
+
     # ── activity ──────────────────────────────────────────────────────────────
 
     @property
-    def activity(self) -> LawnMowerActivity:
-        dps = self.coordinator.data
-        dp1   = dps.get(DP_TASK_ACTIVE, False)
-        dp2   = dps.get(DP_PAUSED,      False)
-        dp118 = dps.get(DP_PROGRESS,    0)
+    def activity(self) -> LawnMowerActivity | None:
+        dps = self.coordinator.local_dps
+        dp1 = task_active(dps)
+        if type(dp1) is not bool:
+            return None
+        dp2 = dps.get(DP_PAUSED, False)
+        dp118 = dps.get(DP_PROGRESS, 0)
 
         # Paused: task active but movement stopped
         if dp1 and dp2:
@@ -95,23 +100,20 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         # DP1 absent or False → no active session → docked / idle
         return LawnMowerActivity.DOCKED
 
-    # ── commands ──────────────────────────────────────────────────────────────
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "operating_mode": self.coordinator.operating_mode,
+            "telemetry_updated_at": self.coordinator.last_local_update,
+            "command": self.coordinator.command.as_dict() if self.coordinator.command else None,
+        }
 
     async def async_start_mowing(self) -> None:
-        """Start or resume mowing."""
-        current = self.activity
-        if current == LawnMowerActivity.PAUSED:
-            dp, val = CMD_RESUME
-        else:
-            dp, val = CMD_START
-        await self.coordinator.async_send_command(dp, val)
+        action = "resume" if self.activity == LawnMowerActivity.PAUSED else "start"
+        await self.coordinator.async_send_mower_command(action)
 
     async def async_pause(self) -> None:
-        """Pause the mowing session."""
-        dp, val = CMD_PAUSE
-        await self.coordinator.async_send_command(dp, val)
+        await self.coordinator.async_send_mower_command("pause")
 
     async def async_dock(self) -> None:
-        """Stop mowing and return to base."""
-        dp, val = CMD_DOCK
-        await self.coordinator.async_send_command(dp, val)
+        await self.coordinator.async_send_mower_command("dock")

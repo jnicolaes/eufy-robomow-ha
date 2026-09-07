@@ -14,8 +14,14 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_HOST
+from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -24,7 +30,13 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
+    CONF_MAP_CERTIFICATE_FINGERPRINT,
+    CONF_MAP_SOURCE_URL,
+    CONF_OPERATING_MODE,
+    DEFAULT_OPERATING_MODE,
+    OPERATING_MODES,
 )
+from .map_source import MapSourceError, MapSourceSettings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +87,14 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
         self._email:      str        = ""
         self._password:   str        = ""
         self._discovered: list[dict] = []  # Tuya device dicts
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> EufyRobomowOptionsFlow:
+        """Create the options flow."""
+        return EufyRobomowOptionsFlow()
 
     # ── Step 1: credentials ───────────────────────────────────────────────────
 
@@ -172,6 +192,7 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_LOCAL_KEY:     local_key,
                         CONF_EUFY_EMAIL:    self._email,
                         CONF_EUFY_PASSWORD: self._password,
+                        CONF_OPERATING_MODE: DEFAULT_OPERATING_MODE,
                     },
                 )
 
@@ -185,6 +206,60 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(step_schema, suggested),
             errors=errors,
             description_placeholders={"device_count": str(len(self._discovered))},
+        )
+
+
+class EufyRobomowOptionsFlow(OptionsFlowWithReload):
+    """Manage operating mode and optional read-only map acquisition."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure integration behavior."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                MapSourceSettings.from_values(
+                    base_url=user_input.get(CONF_MAP_SOURCE_URL, ""),
+                    certificate_fingerprint=user_input.get(
+                        CONF_MAP_CERTIFICATE_FINGERPRINT,
+                        "",
+                    ),
+                    local_key=self.config_entry.data[CONF_LOCAL_KEY],
+                )
+            except MapSourceError:
+                errors["base"] = "invalid_map_source"
+            else:
+                return self.async_create_entry(data=user_input)
+
+        current_mode = self.config_entry.options.get(
+            CONF_OPERATING_MODE,
+            self.config_entry.data.get(CONF_OPERATING_MODE, DEFAULT_OPERATING_MODE),
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_OPERATING_MODE): vol.In(OPERATING_MODES),
+                vol.Optional(CONF_MAP_SOURCE_URL): str,
+                vol.Optional(CONF_MAP_CERTIFICATE_FINGERPRINT): str,
+            }
+        )
+        suggested = {
+            CONF_OPERATING_MODE: current_mode,
+            CONF_MAP_SOURCE_URL: self.config_entry.options.get(
+                CONF_MAP_SOURCE_URL,
+                "",
+            ),
+            CONF_MAP_CERTIFICATE_FINGERPRINT: self.config_entry.options.get(
+                CONF_MAP_CERTIFICATE_FINGERPRINT,
+                "",
+            ),
+        }
+        if user_input is not None:
+            suggested.update(user_input)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+            errors=errors,
         )
 
 

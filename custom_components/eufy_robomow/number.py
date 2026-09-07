@@ -49,6 +49,9 @@ async def async_setup_entry(
 ) -> None:
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
 
+    if not coordinator.control_enabled:
+        return
+
     entities: list[NumberEntity] = [
         EufyCutHeightNumber(coordinator, entry),
         EufyVolumeNumber(coordinator, entry),
